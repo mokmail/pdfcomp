@@ -1,6 +1,7 @@
 import tkinter as tk
 from PIL import Image, ImageChops, ImageTk
-from tkinter import  Canvas
+from tkinter import Canvas
+from datetime import datetime
 
 from tkinter import messagebox
 import os
@@ -9,6 +10,7 @@ import shutil
 from tkinter import ttk
 
 from thepdffile import Thefile
+
 from wido import Wido
 
 
@@ -19,7 +21,6 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
-
 
 
 root = Wido()
@@ -38,14 +39,12 @@ frm.grid(column=0, row=3,)
 frm3.grid(column=0, row=5)
 frm4.grid(column=0, row=6)
 #root.title('PDF COMPARE')
-''' pr = ttk.Progressbar(
+pr = ttk.Progressbar(
     frm2,
     orient='horizontal',
     mode='indeterminate',
     length=280
 )
-pr.grid(column=0, row=3)
-'''
 
 
 canvas = Canvas(
@@ -59,7 +58,7 @@ canvas.create_image(
     163,
     70,
 
-#   image=img
+    #   image=img
 )
 
 
@@ -68,6 +67,26 @@ class Comparer:
         self.wert = 0
         self.temp_delete()
 
+    def deco(function, *args):
+
+        def wrapper(self, *args):
+            #pr.grid(column=0, row=3)
+            #pr.start()
+
+            start = datetime.now()
+
+            #messagebox.showinfo('Started', start )
+
+            dos = function(self, *args)
+            end = datetime.now()
+            duration = end-start
+            messagebox.showinfo('Done', duration)
+
+            return(dos)
+
+        return wrapper
+
+    @deco
     def openfile(self, fos):
         # pr.start()
         self.thepdf = Thefile(fos)
