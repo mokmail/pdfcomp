@@ -11,9 +11,9 @@ from pdf2image import convert_from_path
 
 class Thefile:
 
-    def __init__(self, fos):
+    def __init__(self, fos): 
 
-        self.fos = fos
+        self.fos = fos #fisrt or second
         self.filepath = self.makeFileName(self.fos)
 
         self.filename = '{}_{}_IMG'.format(self.fos,
