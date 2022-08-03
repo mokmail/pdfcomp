@@ -1,9 +1,6 @@
 import tkinter as tk
-
 from PIL import Image, ImageChops, ImageTk
 from tkinter import  Canvas
-
-
 
 from tkinter import messagebox
 import os
