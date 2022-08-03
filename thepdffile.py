@@ -7,13 +7,11 @@ import os
 from pdf2image import convert_from_path
 
 
-
-
 class Thefile:
 
-    def __init__(self, fos): 
+    def __init__(self, fos):
 
-        self.fos = fos #fisrt or second
+        self.fos = fos  # first or second
         self.filepath = self.makeFileName(self.fos)
 
         self.filename = '{}_{}_IMG'.format(self.fos,
@@ -54,7 +52,7 @@ class Thefile:
     def save_pdf_pages(self):
         if not self.singelpage:
             asa = sm.askinteger("Multiple pages", f"the file you selected contains {self.pagenums} pages,  \n which page do you need to analyse",
-                               
+
                                 minvalue=0, maxvalue=self.pagenums)
 
             self.imaged_pages_from_pdf_file[asa-1].save(
