@@ -1,15 +1,21 @@
-FROM python
+FROM python:3.9-slim
 
-RUN apt-get update -y
-ENV PYTHON_VERSION=3.9.12
+# Install system dependencies
+RUN apt-get update -y && \
+    apt-get install -y \
+    python3-tk \
+    tk-dev \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get upgrade -y
-RUN apt-get install pip -y
-RUN apt-get install tk -y
-RUN pip install pdf2image
-RUN pip install Pillow
-WORKDIR /
-COPY . .
+# Set working directory
+WORKDIR /app
 
+# Install Python packages
+RUN pip install --no-cache-dir pdf2image Pillow
 
+# Copy application files
+COPY pdfcomp.py thepdffile.py wido.py ./
+
+# Run the application
 CMD ["python", "pdfcomp.py"]
