@@ -1,0 +1,10 @@
+# What a full verification needs on top of requirements.txt.
+#
+# The probe exercises every vector backend the registry calls "verified", so the app's
+# interpreter must be able to import their clients. Without them those checks fail, which
+# is correct — the claim would be untrue for that interpreter — but it is not what you
+# want to see on a fresh clone.
+#
+#   python3 -m pip install -r requirements.txt -r tests/requirements-dev.txt
+hnswlib>=0.8          # local HNSW index backend
+qdrant-client>=1.9    # Qdrant backend (used by the compose stack as a service)

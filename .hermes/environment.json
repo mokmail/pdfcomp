@@ -1,0 +1,22 @@
+{
+  "name": "Knowledgebases — PDF extraction, knowledge base, search",
+  "kind": "python",
+  "bootstrap": [
+    "python3 -c \"import starlette, chromadb, pymupdf, hnswlib, qdrant_client\" 2>/dev/null || python3 -m pip install -r requirements.txt -r tests/requirements-dev.txt"
+  ],
+  "build": [
+    "python3 -m compileall -q pdfkb serve.py app.py tests"
+  ],
+  "test": [
+    "bash tests/run_verification.sh"
+  ],
+  "start": "PDFKB_DATA_DIR=/tmp/knowledgebases-boot python3 serve.py --host 127.0.0.1 --port 8000",
+  "port": 8000,
+  "readinessPath": "/api/stats",
+  "evidence": [
+    "The web app is Starlette served by serve.py (ASGI app pdfkb.web:app) — not FastAPI, and not app.py, which is the optional Tkinter desktop client.",
+    "There is no pytest suite: tests/run_verification.sh boots an isolated instance and runs tests/verify_web.py (HTTP API + the rendered page in headless Chrome, 226 checks) plus tests/verify_library_readonly.py.",
+    "The bootstrap is a no-op when the dependencies are already importable, so verification never churns the interpreter it happens to run in.",
+    "Every run uses its own temp data directory and port, because the probe resets and purges knowledge bases on purpose."
+  ]
+}

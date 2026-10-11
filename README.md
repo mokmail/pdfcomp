@@ -256,15 +256,22 @@ python3 tests/make_sample.py tests/sample.pdf   # generate a demo PDF
 python3 tests/gui_smoke.py                       # desktop-client smoke test
 ```
 
-Verification of the web app is run against an **isolated** instance (its own
-`PDFKB_DATA_DIR` and port) so a test run can never touch a real knowledge base.
-The suite drives the HTTP API and the rendered page in headless Chrome, and
-covers extraction, providers, every reachable vector backend, storage switches,
-sources, safeguards, ingest progress, multi-library search, knowledge-base
-isolation (including that a read writes nothing into another base) and the
-destructive paths with their guards — **225 checks, all passing**. A focused
-check proves the same rule at the library level: a read-only knowledge base
-refuses to index, delete, wipe or export.
+The whole verification is one command — it boots an **isolated** instance (its own
+`PDFKB_DATA_DIR` and port), so it can never touch a real knowledge base:
+
+```bash
+bash tests/run_verification.sh          # syntax, the read-only rules, then the web probe
+hermes verify                           # the same thing through the saved recipe
+```
+
+`tests/verify_web.py` drives the HTTP API and the rendered page in headless Chrome and
+covers extraction, providers, every reachable vector backend, storage switches, sources,
+safeguards, ingest progress, multi-library search, knowledge-base isolation (including that
+a read writes nothing into another base) and the destructive paths with their guards —
+**236 checks, 0 failures, 0 skipped** as of the last run. `tests/verify_library_readonly.py`
+proves the same rule at the library level: a read-only knowledge base refuses to index,
+delete, wipe and export. The recipe lives in `.hermes/environment.json`; `tests/requirements-dev.txt`
+carries the two optional backends it exercises (`hnswlib`, `qdrant-client`).
 
 ## Roadmap
 
@@ -364,6 +371,8 @@ One command per choice — it assembles the profiles, the overlays and the image
 
 ```bash
 ./bin/kb up                    # app + Ollama, slim image, embedded vectors
+./bin/kb up --host-ollama      # app only, using the Ollama already on this machine
+./bin/kb up qdrant --host-ollama   # + Qdrant, still no Ollama container
 ./bin/kb up qdrant             # + Qdrant, app already pointed at it, target `clients`
 ./bin/kb up docling            # + extraction as a service (app stays slim, no torch)
 ./bin/kb up qdrant docling     # both, target `full`
@@ -382,8 +391,10 @@ Underneath it is plain `docker compose` with per-database overlays (`compose/vec
 docker compose -f docker-compose.yml -f compose/vector-qdrant.yml --profile qdrant up -d
 ```
 
-If `PDFKB_OLLAMA_URL` points at the host (`http://host.docker.internal:11434`), the picker
-starts only what the variant needs — no Ollama container, no model re-download.
+**Ollama on the machine beats Ollama in a container** on a laptop: it keeps the models it
+already has and uses the GPU properly. `--host-ollama` uses the one running here — the app
+reaches it at `host.docker.internal:11434`, and no ollama container or image is started or
+pulled. Setting `PDFKB_OLLAMA_URL` to the host yourself does the same thing.
 
 Server backends need their client library inside the app image — that is what the `clients`
 target is for. Installing one at runtime works but a container loses it when it is recreated:

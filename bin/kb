@@ -2,6 +2,7 @@
 # Knowledgebases — pick a variant and the stack is assembled for you.
 #
 #   ./bin/kb up                      the app + Ollama, lean image, embedded vectors
+#   ./bin/kb up --host-ollama        the app only, using the Ollama on this machine
 #   ./bin/kb up qdrant               + Qdrant, app pointed at it, client baked in
 #   ./bin/kb up docling              + extraction as its own service (app stays slim)
 #   ./bin/kb up qdrant docling       both, image target `full`
@@ -37,6 +38,9 @@ vector store    $(echo $VECTOR_NAMES | fold -s -w 74 | sed 's/^/                
 
 extraction      docling     Docling as a service, so the app image stays slim
                 (nothing)   in-process Docling if the image has it, else PyMuPDF
+
+ollama          --host-ollama   use the Ollama already running on this machine
+                                (default: it starts the ollama container instead)
 EOF
 }
 
@@ -52,6 +56,7 @@ for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
     docling)   want_docling=1 ;;
+    --host-ollama|--ollama=host) want_host_ollama=1 ;;
     *) echo "unknown variant: $arg" >&2; echo; variants >&2; exit 2 ;;
   esac
 done
@@ -81,26 +86,34 @@ export COMPOSE_PROFILES=""
 
 cmd=(docker compose "${compose_files[@]}" "${profiles[@]}")
 
-# Pointed at the host's Ollama (the usual case on a laptop)? Then do not start — or even
-# pull — the ollama container: start only what this variant actually needs.
+# --------------------------------------------------------------- ollama
+# Ollama runs far better natively than in a container on a laptop: it keeps the models it
+# already has, uses the GPU properly, and costs no extra image. `--host-ollama` says "use the
+# one on this machine"; pointing PDFKB_OLLAMA_URL at the host says the same thing.
 host_ollama=0
+[ "${want_host_ollama:-0}" = 1 ] && host_ollama=1
 case "${PDFKB_OLLAMA_URL:-}" in
   *host.docker.internal*|*://localhost*|*://127.0.0.1*) host_ollama=1 ;;
 esac
+if [ "$host_ollama" = 1 ]; then
+  export PDFKB_OLLAMA_URL="${PDFKB_OLLAMA_URL:-http://host.docker.internal:11434}"
+fi
 services=(app)
 for v in "${vectors[@]:-}"; do [ -n "$v" ] && services+=("$v"); done
 [ "$want_docling" = 1 ] && services+=(docling)
 
+# One composition, used by both `up` and `show`, so what `show` prints is what runs.
+if [ "$host_ollama" = 1 ]; then
+  up_args=(up -d --build --no-deps "${services[@]}")
+else
+  up_args=(up -d --build)
+fi
+
 case "$action" in
   up)      echo "# variant: ${target} image · vectors: ${vectors[*]:-embedded} · docling: $([ "$want_docling" = 1 ] && echo service || echo in-image-or-fallback)"
-           if [ "$host_ollama" = 1 ]; then
-             echo "# using the host's Ollama at ${PDFKB_OLLAMA_URL} — starting only: ${services[*]}"
-             echo "+ ${cmd[*]} up -d --build --no-deps ${services[*]}"
-             "${cmd[@]}" up -d --build --no-deps "${services[@]}"
-           else
-             echo "+ ${cmd[*]} up -d --build"
-             "${cmd[@]}" up -d --build
-           fi ;;
+           [ "$host_ollama" = 1 ] && echo "# using the Ollama on this machine at ${PDFKB_OLLAMA_URL} — starting only: ${services[*]}"
+           echo "+ APP_VARIANT=$target ${cmd[*]} ${up_args[*]}"
+           "${cmd[@]}" "${up_args[@]}" ;;
   build)   echo "+ docker build --target ${target} -t \${APP_IMAGE:-knowledgebases:latest} ."
            docker build --target "$target" -t "${APP_IMAGE:-knowledgebases:latest}" . ;;
   ps)      "${cmd[@]}" ps ;;
@@ -109,7 +122,7 @@ case "$action" in
   destroy) echo "this deletes the containers AND the volumes (knowledge bases included)"; 
            read -r -p "type 'destroy' to confirm: " a; [ "$a" = destroy ] || exit 1
            "${cmd[@]}" down -v ;;
-  show)    echo "+ APP_VARIANT=$target ${cmd[*]} up -d --build" ;;
+  show)    echo "+ APP_VARIANT=$target ${cmd[*]} ${up_args[*]}" ;;
   variants) variants ;;
   -h|--help|help) usage ;;
   *) echo "unknown action: $action" >&2; usage >&2; exit 2 ;;
