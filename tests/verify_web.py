@@ -393,6 +393,29 @@ EVAL_JS = r"""
                    display: getComputedStyle(document.querySelector('#rmodal')).display },
     badgeOnLoad: getComputedStyle(document.querySelector('#job-badge')).display,
     lsSetup: localStorage.getItem('pdfkb-setup'),
+    bar: (() => {
+      const h = document.querySelector('.site-header');
+      const f = document.querySelector('.site-foot');
+      const hr = h.getBoundingClientRect(), fr = f.getBoundingClientRect(), cs = getComputedStyle(f);
+      return { headerPosition: getComputedStyle(h).position, headerTop: Math.round(hr.top),
+               position: cs.position, bottom: Math.round(fr.bottom),
+               viewport: window.innerHeight, height: Math.round(fr.height),
+               pageRoom: getComputedStyle(document.body).paddingBottom };
+    })(),
+    foot: (() => {
+      const f = document.querySelector('.site-foot');
+      if (!f) return null;
+      const link = f.querySelector('.foot-link');
+      const facts = [...f.querySelectorAll('.fact')].map(e => [e.querySelector('.fk').textContent.trim(),
+                                                              e.querySelector('.fv').textContent.trim()]);
+      return { exists: true, text: f.textContent.replace(/\s+/g, ' ').trim(),
+               developer: /Mohammed Kmail/.test(f.textContent),
+               linkHref: link && link.getAttribute('href'),
+               linkText: link && link.textContent.trim(),
+               linkRel: link && link.getAttribute('rel'), newTab: link && link.target === '_blank',
+               facts, version: (document.querySelector('#foot-version') || {}).textContent,
+               year: (document.querySelector('#foot-year') || {}).textContent };
+    })(),
     setupFold: { tag: document.querySelector('#setupbar')?.tagName,
                  open: !!document.querySelector('#setupbar')?.open },
     design: { body: st(document.body), h1: st(document.querySelector('h1')),
@@ -781,7 +804,39 @@ async def dom_checks():
             check("brand logo mark loaded",
                   "logo-mark.png" in (d["markSrc"] or ""), f"{d['markSrc']} filter={d['markFilter']}")
             check("breadcrumb names the tool", "knowledgebases" in (d["crumb"] or "").lower(), d["crumb"])
-            check("the strip under the page is gone", d.get("footerGone") is True)
+            check("the old status strip is gone (the footer is a colophon now)",
+                  d.get("footerGone") is True)
+            bar = d.get("bar") or {}
+            htop = bar.get("headerTop")          # 0 is a valid top — `or` would turn it into 99
+            check("the header is still sticky at the top of the window",
+                  bar.get("headerPosition") == "sticky" and htop is not None and abs(htop) <= 2,
+                  f"{bar.get('headerPosition')} at {htop}px")
+            check("the footer is pinned to the bottom of the window",
+                  bar.get("position") == "fixed"
+                  and abs((bar.get("bottom") or 0) - (bar.get("viewport") or 0)) <= 2,
+                  f"position={bar.get('position')} bottom={bar.get('bottom')} viewport={bar.get('viewport')} h={bar.get('height')}")
+            check("the page leaves room for the pinned footer, so nothing hides under it",
+                  (float((bar.get("pageRoom") or "0px").rstrip("px")) or 0) >= (bar.get("height") or 0),
+                  f"{bar.get('pageRoom')} reserved for a {bar.get('height')}px footer")
+            ft = d.get("foot") or {}
+            check("the footer credits the developer",
+                  ft.get("developer") is True and "Designed and built by" in (ft.get("text") or ""),
+                  (ft.get("text") or "")[:80])
+            check("the footer links to kmail.at, opening in a new tab",
+                  ft.get("linkHref") == "https://kmail.at" and ft.get("linkText") == "kmail.at"
+                  and ft.get("newTab") is True and "noopener" in (ft.get("linkRel") or ""),
+                  f"{ft.get('linkText')} -> {ft.get('linkHref')} rel={ft.get('linkRel')}")
+            check("the footer carries facts about this installation",
+                  len(ft.get("facts") or []) >= 8
+                  and all(k and v for k, v in (ft.get("facts") or []))
+                  and (ft.get("version") or "").startswith("v")
+                  and (ft.get("year") or "").isdigit(),
+                  f"{len(ft.get('facts') or [])} facts · version {ft.get('version')} · © {ft.get('year')}")
+            names = [k for k, _ in (ft.get("facts") or [])]
+            check("those facts include the counts and the build",
+                  {"documents", "chunks", "vectors", "embedding", "vector store"} <= set(names)
+                  and "runs on" in names and "up for" in names,
+                  names)
             sf2 = d.get("setupFold") or {}
             check("the info strip is foldable, and folded unless it was left open",
                   sf2.get("tag") == "DETAILS" and sf2.get("open") == (d.get("lsSetup") == "open")

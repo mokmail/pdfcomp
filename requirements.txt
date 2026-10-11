@@ -8,6 +8,8 @@ numpy>=1.26
 starlette                # ASGI web framework (used directly, no FastAPI)
 uvicorn>=0.30            # ASGI server
 python-multipart         # multipart uploads for /api/ingest
+pydantic<2.14            # chromadb pulls pydantic in; 2.14 breaks Docling's import, and
+                         # Docling is the default extractor — keep the pin
 
 # Optional: local embedding model if you do NOT run Ollama.
 # Heavy (pulls torch). Only needed as the middle fallback provider.

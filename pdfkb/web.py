@@ -35,6 +35,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import config, prefs, sources
+from . import __version__
 from .embeddings import get_embedder, list_ollama_models, probe_embedder  # noqa: F401
 from .extract import EXTRACTORS, docling_available, docling_service_ready, docling_service_url, docling_version
 from .store import KB
@@ -43,6 +44,7 @@ from .vectors import make_vector_store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MASK = "••••••"
+_STARTED = time.time()        # the footer reports how long this instance has been up
 
 _kb: KB | None = None
 _kbs: dict = {}          # non-active libraries, opened on demand for cross-library search
@@ -88,6 +90,36 @@ def reload_kb():
 
 
 # ---------------------------------------------------------------- helpers
+def _about(k: "KB") -> dict:
+    """Facts about this installation, for the footer: nothing hard-coded, nothing guessed."""
+    import platform
+
+    st = prefs.storage()
+    db = Path(st["sqlite_path"])
+    try:
+        db_bytes = db.stat().st_size if db.exists() else 0
+    except OSError:
+        db_bytes = 0
+    try:
+        pages = k.conn.execute("SELECT COALESCE(SUM(npages), 0) p FROM documents").fetchone()["p"]
+    except Exception:                                     # noqa: BLE001
+        pages = 0
+    return {
+        "version": __version__,
+        "python": platform.python_version(),
+        "platform": f"{platform.system()} {platform.release()}",
+        "started": int(_STARTED),
+        "uptime_s": int(time.time() - _STARTED),
+        "pages": int(pages),
+        "libraries": len(prefs.libraries_list()),
+        "db_file": db.name,
+        "db_bytes": int(db_bytes),
+        "backends": len(vector_backends()),
+        "connectors": len(sources.connectors()),
+        "extractors": len(EXTRACTORS),
+    }
+
+
 def _stats() -> dict:
     k = kb()
     s = k.stats()
@@ -99,7 +131,8 @@ def _stats() -> dict:
             "collection_stamp": s.get("collection_stamp"),
             "collection_match": s.get("collection_match"),
             "extractor": prefs.load().get("extractor") or "pymupdf",
-            "vector_error": s.get("vector_error"), "sqlite": s["sqlite"], "data_dir": s["data_dir"]}
+            "vector_error": s.get("vector_error"), "sqlite": s["sqlite"], "data_dir": s["data_dir"],
+            "about": _about(k)}
 
 
 def _stored_dim():

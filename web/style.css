@@ -195,6 +195,9 @@ summary[open] > .chev, summary[open] > .setup-caret{ transform:rotate(180deg) }
 
 /* --------------------------------------------------------------- main */
 .container{ max-width:var(--page); margin:0 auto; padding:40px 28px 64px }
+/* the footer is pinned to the bottom of the window, so the page keeps that much room free
+   — measured into --foot-h, because the facts strip rewraps and changes the height */
+body{ padding-bottom:var(--foot-h, 150px) }
 
 /* ------------------------------------------------ landing search field */
 .search-hero{ max-width:920px; margin:0 auto 44px; text-align:center }
@@ -472,6 +475,47 @@ dialog.rmodal:not([open]){ display:none }   /* a closed dialog is gone, not just
   .rmodal-body{ grid-template-columns:minmax(0,1fr) }
   .rmodal-col + .rmodal-col{ border-left:0; border-top:1px solid rgb(var(--line-dim)) }
 }
+
+/* ---------------------------------------------------------------- footer
+   The credits sit under the page and stay there: the footer is pinned to the bottom of the
+   window, so who built it and what this installation is are always a glance away. The facts
+   strip is a grid of label-over-value cells with hairlines in the gaps; the page leaves the
+   measured height free (--foot-h) so nothing ever hides behind it. */
+.site-foot{
+  position:fixed; left:0; right:0; bottom:0; z-index:39;
+  border-top:1px solid rgb(var(--line-dim)); background:rgb(var(--bg-panel));
+}
+/* the facts strip: label over value, one hairline between cells */
+.site-foot .foot-facts{
+  max-width:var(--page); margin:0 auto; padding:0 28px;
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(118px, 1fr));
+  gap:1px; background:rgb(var(--line-dim));       /* the gaps become the hairlines */
+}
+.site-foot .fact{
+  background:rgb(var(--bg-panel)); padding:8px 10px 9px;
+  font-family:var(--font-mono); line-height:1.3;
+}
+.site-foot .fk{ display:block; font-size:9px; letter-spacing:.1em; text-transform:uppercase;
+                color:rgb(var(--text-faint)) }
+.site-foot .fv{ display:block; margin-top:2px; font-size:11.5px; color:rgb(var(--text-ghost));
+                word-break:break-word }
+.site-foot .fact.is-acc .fv{ color:rgb(var(--acc-2)) }
+.site-foot .inner{
+  max-width:var(--page); margin:0 auto; padding:13px 28px 15px;
+  display:flex; flex-wrap:wrap; gap:10px 40px; justify-content:space-between;
+  font-family:var(--font-mono); font-size:11px; line-height:1.6; color:rgb(var(--text-faint));
+}
+.site-foot p{ margin:0 }
+.foot-col.foot-right{ text-align:right }
+.foot-prod{ color:rgb(var(--text-ghost)); text-transform:uppercase; letter-spacing:.08em;
+            font-size:10.5px }
+.foot-v{ color:rgb(var(--text-faint)) }
+.site-foot b{ color:rgb(var(--text-dim)); font-weight:500 }
+.foot-link{ color:rgb(var(--acc-2)); text-decoration:none;
+            border-bottom:1px solid transparent; transition:border-color .15s }
+.foot-link:hover{ border-bottom-color:rgb(var(--acc-2)/.55) }
+.foot-link .ic{ width:11px; height:11px; margin-left:4px; opacity:.75 }
+.foot-sep{ color:rgb(var(--text-faint)/.55); margin:0 5px }
 
 /* ------------------------------------------------------------ status */
 .statusbar{ display:none }

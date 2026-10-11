@@ -123,6 +123,7 @@ async function refresh() {
     const s = await api.get("/api/stats");
     state.lastStats = s;
     renderSetup();
+    paintFooter(s);
     const hint = $("#search-hint");
     if (hint) {
       hint.hidden = s.documents !== 0;
@@ -1107,6 +1108,50 @@ $("#st-defaults").onclick = () => {
   $("#st-backend").value = "chroma";
   $("#st-save").click();
 };
+
+/* The colophon under the page: what this installation actually is, from /api/stats.about,
+   plus the index counts. Every value comes from the server — a fact that cannot be read is
+   left out rather than guessed at. */
+function paintFooter(s) {
+  const a = (s && s.about) || {};
+  const up = (secs) => {
+    if (secs == null) return null;
+    if (secs < 90) return `${secs}s`;
+    if (secs < 5400) return `${Math.round(secs / 60)}m`;
+    return `${(secs / 3600).toFixed(1)}h`;
+  };
+  const facts = [
+    ["documents", s.documents], ["pages", a.pages], ["chunks", s.chunks], ["vectors", s.vectors],
+    ["knowledge bases", a.libraries],
+    ["knowledge base file", a.db_file ? `${a.db_file} · ${fmtBytes(a.db_bytes || 0)}` : null],
+    ["embedding", s.provider],
+    ["extractor", s.extractor ? `${s.extractor}${s.extractor === "docling" && a.docling ? ` ${a.docling}` : ""}` : null],
+    ["vector store", s.vector_backend ? `${s.vector_backend} · ${s.vector_collection || "pdf_chunks"}` : null],
+    ["runs on", a.python ? `python ${a.python} · ${a.platform}` : null],
+    ["up for", up(a.uptime_s)],
+    ["in the box", a.backends ? `${a.backends} vector backends · ${a.connectors} sources · ${a.extractors} extractors` : null],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== "");
+
+  $("#foot-facts").innerHTML = facts.map(([k, v]) =>
+    `<span class="fact${k === "knowledge base file" ? " is-acc" : ""}">`
+    + `<span class="fk">${esc(k)}</span><span class="fv">${esc(String(v))}</span></span>`).join("");
+  const ver = $("#foot-version");
+  if (ver) ver.textContent = a.version ? `v${a.version}` : "";
+}
+const footYear = $("#foot-year");
+if (footYear) footYear.textContent = String(new Date().getFullYear());
+
+/* The footer is pinned to the bottom of the window, so the page has to leave exactly its
+   height free — measured, because the facts strip rewraps with the window width. */
+function measureFooter() {
+  const f = document.querySelector(".site-foot");
+  if (f) document.documentElement.style.setProperty("--foot-h", Math.ceil(f.getBoundingClientRect().height) + "px");
+}
+measureFooter();
+addEventListener("resize", measureFooter);
+requestAnimationFrame(measureFooter);
+addEventListener("load", measureFooter);
+
 
 /* --------------------------------------------------------------- init */
 paintIcons();        // the static markup's icons, before anything is rendered into it
