@@ -290,6 +290,29 @@ that falls back to *open in new tab* where the browser cannot render the origina
 behaviour, existing knowledge bases, citations and vector ids stay as they are. The
 task-by-task plan is `.hermes/plans/2026-10-11_205850-more-file-types.md`.
 
+**GitHub as a source.** Index a repository rather than a folder: the documents under it
+(README, `docs/**`, markdown, and any PDFs), its issues and pull requests with their comments,
+its releases and its wiki. One issue thread becomes one document whose blocks are the body and
+each comment, so a hit points at `issue #123 · comment 4` and not at the whole thread; each
+item keeps its `ETag`/`updated_at`, so a re-scan costs almost no rate limit and refetches only
+what changed. Plan: `.hermes/plans/2026-10-11_221041-sources-github-and-kms.md`.
+
+**Knowledge-management systems — Confluence and the rest.** The same connector contract
+extended from *files* to *documents*: Confluence first (CQL listing, `version.number` as the
+version, the page URL as the citation, storage-format XHTML through the HTML extractor), then
+Notion, SharePoint/OneDrive, Google Drive, Jira, Slack/Teams, MediaWiki, BookStack, Outline,
+Zendesk and ServiceNow, plus a crawl connector for anything with a web UI. Syncs are
+incremental and resumable, and an item that disappears upstream is marked *stale*, never
+purged. Plan: `.hermes/plans/2026-10-11_221041-sources-github-and-kms.md`.
+
+**An MCP server — expose the app and its tools to AI assistants.** The engine is plain Python
+behind the web API, so the same operations can be served over the Model Context Protocol:
+`search`, `list_knowledge_bases`, `list_documents`, `read_page` and `stats` as tools, every
+document and page as a readable resource, and adding/removing documents behind an explicit
+write flag. Served over **stdio** for desktop assistants (Claude Desktop, Claude Code) and
+**Streamable HTTP** mounted into the app at `/mcp` for remote ones, token-protected. Plan:
+`.hermes/plans/2026-10-11_221041-mcp-server.md`.
+
 ## Docker Compose — the app, Docling, and the vector databases
 
 The whole stack lives in `docker-compose.yml`. Everything except the app and Ollama is
