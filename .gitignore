@@ -1,5 +1,7 @@
-# knowledge base + vector store data (generated locally)
+# knowledge base + vector store data (generated locally).
+# The app makes one directory per library: kb_data, kb_data-<name>, …
 kb_data/
+kb_data-*/
 # python
 __pycache__/
 *.pyc
