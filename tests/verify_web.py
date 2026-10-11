@@ -397,6 +397,18 @@ EVAL_JS = r"""
                  open: !!document.querySelector('#setupbar')?.open },
     design: { body: st(document.body), h1: st(document.querySelector('h1')),
               micro: st(document.querySelector('.micro')), primaryBtn: st(document.querySelector('.btn.primary')) },
+    icons: (() => {
+      const ic = [...document.querySelectorAll('svg.ic')];
+      const buttons = [...document.querySelectorAll('.btn, .btn.primary, .tab, a.btn')];
+      const glyphs = buttons.map(b => (b.textContent || '').trim())
+        .filter(t => /[◐◑✦✕✓•▾▸⚠]/.test(t));
+      return { count: ic.length,
+               strokes: [...new Set(ic.map(s => getComputedStyle(s).strokeWidth))],
+               fills: [...new Set(ic.map(s => getComputedStyle(s).fill))],
+               wrong: [...document.querySelectorAll('[data-ic]')]
+                 .filter(e => e.querySelectorAll('svg.ic').length !== 1).map(e => e.id || e.dataset.ic),
+               theme: document.querySelectorAll('#theme svg.ic').length, glyphs };
+    })(),
   };
   // the landing search field
   const qEl = document.querySelector('#q');
@@ -810,6 +822,16 @@ async def dom_checks():
             check("every strong colour is a brand colour (no stray browser hues)",
                   not cl.get("offBrand") and not cdk.get("offBrand"),
                   f"light={(cl.get('offBrand') or [])[:2]} dark={(cdk.get('offBrand') or [])[:2]}")
+            ic = d.get("icons") or {}
+            check("icons: every control carries a glyph, exactly one each",
+                  ic.get("count", 0) >= 15 and ic.get("wrong") == [] and ic.get("theme") == 1,
+                  f"{ic.get('count')} icons · theme={ic.get('theme')} · wrong={ic.get('wrong')}")
+            check("icons: one thin stroke weight, never filled",
+                  set(ic.get("strokes") or []) <= {"1.25px", "1.4px"}
+                  and set(ic.get("fills") or []) == {"none"},
+                  f"strokes={ic.get('strokes')} fills={ic.get('fills')}")
+            check("icons: no character is left standing in for an icon",
+                  not ic.get("glyphs"), f"{ic.get('glyphs')}")
 
             check("search through the UI returned rows", len(d["rows"]) > 0, f"{len(d['rows'])} rows")
             if d["rows"]:
