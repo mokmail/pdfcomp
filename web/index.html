@@ -58,6 +58,7 @@
 
     <div class="dropzone" id="drop">Drop PDFs here</div>
     <div class="bar"><i id="bar"></i></div>
+    <pre class="log live" id="ingest-live" hidden></pre>
 
     <p class="micro">Log</p>
     <pre class="log" id="log"></pre>
@@ -107,14 +108,8 @@
       <tbody></tbody>
     </table>
 
-    <p class="micro" style="margin-top:26px">Selected result — full chunk + page context</p>
-    <div class="citation" id="citation"></div>
-    <pre class="detail" id="detail"></pre>
-    <div class="actions">
-      <a class="btn" id="open" href="#" target="_blank" rel="noopener">Open source PDF</a>
-      <button class="btn" id="copy-cite" type="button">Copy citation</button>
-      <button class="btn" id="copy-text" type="button">Copy text</button>
-    </div>
+    <p class="hint" style="margin-top:18px">Click a result: the matched chunk, the page around it
+      and the original document open in a window over this one.</p>
   </section>
 
   <!-- -------------------------------------------------------- sources -->

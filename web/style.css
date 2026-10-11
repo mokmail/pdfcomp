@@ -226,6 +226,10 @@ pre.log, pre.detail{
   font-size:12px; line-height:1.65; white-space:pre-wrap; word-break:break-word;
 }
 pre.log{ height:220px } pre.detail{ max-height:320px }
+/* the live embedding/indexing line: it keeps reporting while you are on another page */
+pre.log.live{
+  height:auto; min-height:46px; margin:0 0 16px; border-left:3px solid rgb(var(--acc-2));
+}
 
 .opts{ display:flex; flex-wrap:wrap; align-items:center; gap:18px; margin:20px 0 }
 #k{ width:66px; padding:8px; font-family:var(--font-mono); font-size:12px;
@@ -281,6 +285,8 @@ td{ padding:11px 10px; vertical-align:top; border-bottom:1px solid rgb(var(--lin
 tbody tr{ cursor:pointer }
 tbody tr:hover, tbody tr.is-sel{ background:rgb(var(--bg-panel-hi)) }
 td.mono{ font-family:var(--font-mono); font-size:11.5px }
+/* which knowledge base the hit was saved in, under the library name */
+.kbtag{ display:block; margin-top:2px; font-size:10px; color:rgb(var(--acc-2)/.85) }
 .src{ color:rgb(var(--text-ghost)) }
 .hint{ color:rgb(var(--text-faint)); font-size:13px; cursor:default }
 
@@ -349,19 +355,22 @@ code{
   width:min(1180px, 94vw); max-height:88vh; padding:0; border-radius:3px;
   background:rgb(var(--bg-void)); color:rgb(var(--text-dim));
   border:1px solid rgb(var(--line-dim)); overflow:hidden;
+  display:flex; flex-direction:column;      /* pinned head, pinned foot, scrolling middle */
 }
 .rmodal::backdrop{ background:rgb(0 0 0 / .45) }
 .rmodal-head{
+  flex:0 0 auto;
   display:flex; align-items:flex-start; justify-content:space-between; gap:20px;
   padding:16px 20px 12px; border-bottom:1px solid rgb(var(--line-dim));
 }
 .rmodal-head h3{ margin:6px 0 0; font-size:18px; font-weight:600;
                  letter-spacing:-.01em; color:rgb(var(--text-ghost)) }
 .rmodal-body{
+  flex:1 1 auto; min-height:0; max-height:calc(88vh - 128px);
+  overflow-y:auto; overscroll-behavior:contain;   /* tall content scrolls, never clips */
   display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:0;
-  max-height:calc(88vh - 128px);
 }
-.rmodal-col{ padding:16px 20px; overflow:auto }
+.rmodal-col{ padding:16px 20px }
 .rmodal-col + .rmodal-col{ border-left:1px solid rgb(var(--line-dim)) }
 .rmodal-col .micro{ margin:0 0 8px }
 .rmodal-col pre.detail{ max-height:none }
@@ -369,6 +378,7 @@ code{
            display:flex; align-items:center; justify-content:center; overflow:hidden }
 .docframe iframe{ width:100%; height:60vh; border:0; display:block }
 .rmodal-foot{
+  flex:0 0 auto;
   display:flex; flex-wrap:wrap; align-items:center; gap:10px;
   padding:12px 20px; border-top:1px solid rgb(var(--line-dim));
 }
@@ -405,8 +415,12 @@ code{
 .crumb .sep{ color:rgb(var(--acc-2)/.55) }
 .crumb b{ color:rgb(var(--acc-2)); font-weight:500 }
 
-/* the running-job indicator goes amber, the sweep bar goes brand-gradient */
+/* the running-job indicator: cyan while indexing, amber for an install or pull */
 #job-badge{ border-color:rgb(var(--acc-warn)/.55); color:rgb(var(--acc-warn)) }
+#job-badge[data-kind="ingest"]{ border-color:rgb(var(--acc-2)/.55); color:rgb(var(--acc-2)) }
+#job-badge[data-kind="ingest"] .dot{ background:rgb(var(--acc-2)) }
+#job-badge[data-kind="ingest"]:hover{ background:rgb(var(--acc-2)/.10) }
+#job-badge[data-kind="job"] .dot{ background:rgb(var(--acc-warn)) }
 #job-badge:hover{ background:rgb(var(--acc-warn)/.10) }
 #job-badge .dot{ background:rgb(var(--acc-warn)) }
 #jobbar{ background:rgb(var(--acc-warn)/.16) }

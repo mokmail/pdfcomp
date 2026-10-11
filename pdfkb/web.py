@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -46,6 +47,11 @@ MASK = "••••••"
 _kb: KB | None = None
 _kbs: dict = {}          # non-active libraries, opened on demand for cross-library search
 _job = {"kind": None, "target": None, "lines": [], "ok": None, "running": False}
+# What ingestion is doing right now. Its own record (not _job) so an install and an
+# ingest can run at once, and so the header can show the ingest while the user is on
+# any other page — the extraction/embedding keeps running server-side either way.
+_ingest = {"running": False, "ok": None, "filename": None, "index": 0, "total": 0,
+           "detail": "", "pct": 0, "started": None, "done": None, "results": []}
 _lock = threading.Lock()
 
 
@@ -90,10 +96,29 @@ def _stored_dim():
     return kb()._stored_dim()
 
 
-def _hit(h: dict, lib: str | None = None) -> dict:
+def _kb_label(lib: str) -> dict:
+    """Which knowledge base a library actually lives in.
+
+    A library is only a name; the knowledge base is the store behind it. Two entries
+    can point at the same one, so every hit names it outright — the folder + database
+    file, and the vector store holding the embeddings. Folder/file only: the full
+    server path never leaves the machine.
+    """
+    try:
+        cfg = prefs.libraries_map().get(lib)
+        st = prefs.storage(cfg) if cfg else prefs.storage()
+    except Exception:  # noqa: BLE001
+        return {"file": None, "store": None}
+    d, db = Path(st["data_dir"]), Path(st["sqlite_path"])
+    return {"file": f"{d.name}/{db.name}", "folder": d.name,
+            "store": f"{st['vector_backend']}·{st['vector_collection']}"}
+
+
+def _hit(h: dict, lib: str | None = None, kb: dict | None = None) -> dict:
     h = dict(h)
     lib = lib or h.get("library") or prefs.active_library()
     h["library"] = lib
+    h["knowledge_base"] = kb if kb is not None else _kb_label(lib)
     # the URL carries the library, so a hit always opens the copy it came from
     h["url"] = f"/api/pdf/{lib}/{h['doc_id']}#page={h['page']}"
     h.pop("path", None)
@@ -109,8 +134,10 @@ def _resolve_libs(asked):
 
 def _search_multi(q, mode, k, libs):
     """Search one or several libraries and merge the ranked lists."""
+    labels = {lib: _kb_label(lib) for lib in libs}
     if len(libs) == 1:
-        return [_hit(h, libs[0]) for h in _kb_for(libs[0]).search(q, k=k, mode=mode)]
+        return [_hit(h, libs[0], labels[libs[0]])
+                for h in _kb_for(libs[0]).search(q, k=k, mode=mode)]
 
     per = {}
     for lib in libs:
@@ -131,7 +158,7 @@ def _search_multi(q, mode, k, libs):
     out = sorted(merged.values(), key=lambda x: x["_rrf"], reverse=True)[:k]
     for h in out:
         h["score"] = h.pop("_rrf", 0.0)
-    return [_hit(h, h.get("library")) for h in out]
+    return [_hit(h, h.get("library"), labels.get(h.get("library"))) for h in out]
 
 
 def _save_bytes(filename, data: bytes) -> Path:
@@ -199,20 +226,39 @@ async def documents(request: Request):
 
 
 async def ingest(request: Request):
+    """Extract + embed every uploaded PDF, reporting progress the whole way.
+
+    The work is done here on the server (so it survives the user browsing to
+    another page); `_ingest` is what the header polls to show it still running.
+    """
     form = await request.form()
     files = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
     force = str(form.get("force", "")).lower() in ("true", "1", "on", "yes")
     results = []
-    for uf in files:
-        try:
-            data = await uf.read()
-            dest = await run_in_threadpool(_save_bytes, uf.filename, data)
-            r = await run_in_threadpool(kb().add_document, str(dest), force)
-            r["size"] = len(data)
-        except Exception as ex:  # noqa: BLE001
-            r = {"status": "error", "filename": getattr(uf, "filename", None),
-                 "message": f"{type(ex).__name__}: {ex}"}
-        results.append(r)
+
+    def progress(done, total, msg):
+        _ingest.update(detail=msg,
+                       pct=int(round(100 * min(1.0, max(0.0, done / total)))) if total else 0)
+
+    _ingest.update(running=True, ok=None, started=time.time(), done=None, pct=0, index=0,
+                   total=len(files), results=[], detail="starting",
+                   filename=files[0].filename if files else None)
+    try:
+        for i, uf in enumerate(files, 1):
+            _ingest.update(index=i, filename=uf.filename, pct=0)
+            try:
+                data = await uf.read()
+                dest = await run_in_threadpool(_save_bytes, uf.filename, data)
+                r = await run_in_threadpool(kb().add_document, str(dest), force, progress)
+                r["size"] = len(data)
+            except Exception as ex:  # noqa: BLE001
+                r = {"status": "error", "filename": getattr(uf, "filename", None),
+                     "message": f"{type(ex).__name__}: {ex}"}
+            results.append(r)
+    finally:
+        _ingest.update(running=False, done=time.time(), pct=100, results=results,
+                       detail="finished",
+                       ok=bool(results) and all(x.get("status") != "error" for x in results))
     return JSONResponse({"results": results, "stats": await run_in_threadpool(_stats)})
 
 
@@ -448,7 +494,8 @@ async def settings_install(request: Request):
 
 
 async def settings_job_status(request: Request):
-    return JSONResponse(dict(_job))
+    """The install/pull job, plus whatever ingestion is doing right now."""
+    return JSONResponse({**dict(_job), "ingest": dict(_ingest)})
 
 
 async def settings_vector_test(request: Request):

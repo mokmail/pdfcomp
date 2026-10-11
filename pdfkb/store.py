@@ -130,10 +130,13 @@ class KB:
             if progress:
                 progress(done, total, msg)
 
-        say(0, 1, f"Reading {Path(pdf_path).name}")
+        say(0, 4, f"Reading {Path(pdf_path).name}")
         prefs_now = prefs.load()
         extractor = prefs_now.get("extractor") or "pymupdf"
         ocr = str(prefs_now.get("docling_ocr", "")).lower() in ("true", "1", "on", "yes")
+        # the long step, and the one worth naming: an extraction engine can sit here for minutes
+        say(1, 4, f"Extracting text with {extractor}" + (" (OCR)" if ocr else "")
+                  + (" — the first Docling run downloads its models" if extractor == "docling" else ""))
         meta, pages = extract_pages(pdf_path, extractor=extractor, ocr=ocr)
 
         existing = self.has_document(meta["sha1"])
@@ -151,10 +154,14 @@ class KB:
                     "message": "No extractable text (scanned image PDF?)"}
 
         texts = [c["text"] for c in chunks]
-        say(1, 3, f"Embedding {len(texts)} chunks via {self.embedder.info()} "
-                  f"(extracted with {meta.get('extractor', 'pymupdf')}"
-                  + (f" — {meta['extractor_note']}" if meta.get("extractor_note") else "") + ")")
-        embs = self.embedder.embed(texts)
+        how = (f"{self.embedder.info()} (extracted with {meta.get('extractor', 'pymupdf')}"
+               + (f" — {meta['extractor_note']}" if meta.get("extractor_note") else "") + ")")
+        # embed in batches so a long PDF reports real progress instead of one silent stall
+        embs, batch = [], 32
+        for i in range(0, len(texts), batch):
+            upto = min(i + batch, len(texts))
+            say(2 + i / len(texts), 4, f"Embedding chunks {upto}/{len(texts)} via {how}")
+            embs.extend(self.embedder.embed(texts[i:upto]))
         dim = len(embs[0])
         stored = self._stored_dim()
         if stored and stored != dim:
@@ -165,7 +172,7 @@ class KB:
 
         chunk_ids = [f"{meta['doc_id']}-{c['chunk_index']:05d}" for c in chunks]
 
-        say(2, 3, "Writing text + metadata to the knowledge base")
+        say(3, 4, "Writing text + metadata to the knowledge base")
         self.conn.execute(
             "INSERT OR REPLACE INTO documents(doc_id,path,filename,sha1,npages,nchunks,"
             "title,added_at,embed_provider,embed_model,embed_dim,extractor) "

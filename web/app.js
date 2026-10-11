@@ -11,7 +11,8 @@ const api = {
 const setText = (sel, txt) => { const el = $(sel); el.hidden = false; el.textContent = txt; };
 
 const state = {
-  results: [], cur: null, docs: [], selDoc: -1, busy: false,
+  results: [], cur: null, docs: [], selDoc: -1, busy: false, ingesting: false,
+  lastQuery: "",
   sources: [], connectors: [], srcSel: null, scan: [],
   libraries: [],
   libs: (() => { try { return JSON.parse(localStorage.getItem("pdfkb-libs") || "[]"); } catch (e) { return []; } })(),
@@ -82,6 +83,7 @@ async function ingest(files) {
   $("#log").textContent = "";
   log(`Ingesting ${files.length} file(s) …`);
   setBusy(true); bar(15);
+  state.ingesting = true; watchJob();     // the header reports it from here on, on any page
   try {
     const r = await api.post("/api/ingest", fd);
     bar(100);
@@ -113,6 +115,7 @@ const score = (h) => h.sim != null ? h.sim.toFixed(3)
 async function doSearch() {
   const q = $("#q").value.trim();
   if (!q) return;
+  state.lastQuery = q;                       // what the current results are the answer to
   const mode = $('input[name=mode]:checked').value;
   const k = Math.min(50, Math.max(1, parseInt($("#k").value, 10) || 10));
   const scope = (state.libs && state.libs.length ? state.libs : []).join(",");
@@ -128,19 +131,21 @@ async function doSearch() {
     tb.innerHTML = "";
     if (!state.results.length) {
       tb.innerHTML = `<tr><td colspan="6" class="hint">No results — add PDFs first, try another query, or widen the search scope.</td></tr>`;
-      $("#detail").textContent = ""; $("#citation").textContent = "";
+      state.cur = null;
       return;
     }
     state.results.forEach((h, i) => {
       const tr = document.createElement("tr");
+      const kb = h.knowledge_base || {};
       tr.innerHTML = `<td class="mono">${i + 1}</td><td class="mono">${score(h)}</td>`
-        + `<td class="mono">${esc(h.library || "")}</td>`
+        + `<td class="mono">${esc(h.library || "")}`
+        + (kb.file ? `<span class="kbtag">${esc(kb.file)}</span>` : "")
+        + `</td>`
         + `<td class="src">${esc(h.filename)}</td><td class="mono">${h.page}</td>`
         + `<td>${snip(h.text)}</td>`;
       tr.onclick = () => { select(i); openResult(i); };
       tb.appendChild(tr);
     });
-    select(0);
   } catch (e) { log("search failed: " + e); }
   finally { setBusy(false); field.classList.remove("is-searching"); }
 }
@@ -151,27 +156,33 @@ $("#q").addEventListener("keydown", (e) => {
   $("#q").value = "";         // Enter clears the field, ready for the next query
 });
 
-async function select(i) {
+/* Changing the search type, the result count or the knowledge bases re-runs the
+   query by itself — and re-shows the query it is re-running, since Enter clears
+   the field. A short debounce keeps ticking several knowledge bases from firing a
+   search per click. */
+let rerunTimer = null;
+function rerunSearch(delay = 0) {
+  clearTimeout(rerunTimer);
+  rerunTimer = setTimeout(() => {
+    const typed = $("#q").value.trim();
+    const q = typed || state.lastQuery || "";
+    if (!q) return;
+    if (!typed) $("#q").value = q;
+    doSearch();
+  }, delay);
+}
+$$("input[name=mode]").forEach((r) => (r.onchange = () => rerunSearch()));
+$("#k").onchange = () => rerunSearch();
+
+/* A result is presented in the modal only — the row highlight is just feedback. */
+function select(i) {
   const h = state.results[i];
   if (!h) return;
   state.cur = h;
   $$("#rtable tbody tr").forEach((tr, j) => tr.classList.toggle("is-sel", j === i));
-  $("#citation").textContent = "citation:  " + h.citation;
-  $("#open").href = h.url;
-  let txt = `library ${h.library || "—"}\nsource  ${h.filename}   (page ${h.page})\n`
-    + `chunk   ${h.chunk_id}\n${"-".repeat(76)}\n${h.text}`;
-  try {
-    const ctx = await api.get(`/api/context?doc_id=${encodeURIComponent(h.doc_id)}`
-      + `&page=${h.page}&library=${encodeURIComponent(h.library || "")}`);
-    txt += `\n\n—— page ${h.page} context ——`;
-    ctx.chunks.forEach((c) => { txt += `\n[p.${c.page}] ${(c.text || "").replace(/\s+/g, " ")}`; });
-  } catch (e) { /* best-effort */ }
-  $("#detail").textContent = txt;
 }
 
 const copy = async (s) => { try { await navigator.clipboard.writeText(s); } catch (e) {} };
-$("#copy-cite").onclick = () => state.cur && copy(state.cur.citation);
-$("#copy-text").onclick = () => state.cur && copy(state.cur.text);
 
 /* --------------------------------------- result modal + document viewer */
 function openResult(i) {
@@ -179,13 +190,15 @@ function openResult(i) {
   if (!h) return;
   state.cur = h;
   const dlg = $("#rmodal");
+  const kb0 = h.knowledge_base || {};
   $("#rmodal-crumb").textContent = `${h.library || "—"}  ·  page ${h.page}`;
   $("#rmodal-title").textContent = h.filename || h.chunk_id;
   $("#rmodal-text").textContent = h.text;
   $("#rmodal-context").textContent = "loading page context…";
   $("#rmodal-show").textContent = `Show in document (p.${h.page})`;
   $("#rmodal-open").href = h.url;
-  $("#rmodal-note").textContent = `${h.library || "—"} · ${h.citation || ""}`;
+  $("#rmodal-note").textContent = `${h.library || "—"} · ${kb0.file || "—"}`
+    + `${kb0.store ? ` (${kb0.store})` : ""} · ${h.citation || ""}`;
   $("#rmodal-show").textContent = `Reload at p.${h.page}`;
   const frame = $("#rmodal-frame");
   const hint = $("#rmodal-hint");
@@ -235,9 +248,11 @@ const fmtDate = (t) => t ? new Date(t * 1000).toISOString().slice(0, 16).replace
 
 async function loadDocs() {
   try {
+    const keep = (state.docs[state.selDoc] || {}).doc_id;   // a re-render must not move the selection
     const r = await api.get("/api/documents");
     state.docs = r.documents || [];
-    state.selDoc = state.docs.length ? 0 : -1;
+    const idx = keep ? state.docs.findIndex((x) => x.doc_id === keep) : -1;
+    state.selDoc = idx >= 0 ? idx : (state.docs.length ? 0 : -1);
     const cur = $("#lib-current");
     if (cur) {
       const act = state.libraries.find((l) => l.active);
@@ -286,21 +301,22 @@ $("#del").onclick = async () => {
       + `${n} chunks and their embeddings are deleted as well, together with the `
       + `stored copy of the file.`)) return;
   setBusy(true);
-  const r = await api.post("/api/delete", new URLSearchParams({ doc_id: d.doc_id }));
-  setBusy(false);
-  const rm = r.removed || {};
-  setText("#lib-result", `deleted '${d.filename}' — ${rm.chunks_removed ?? 0} chunks · `
-    + `${rm.vectors_removed ?? 0} embeddings`
-    + (rm.export_removed ? " · text export removed" : "")
-    + (rm.source_removed ? " · stored copy removed" : "")
-    + (rm.vector_error ? `\nvector purge error: ${rm.vector_error}` : ""));
-  await refresh(); loadDocs();
+  try {
+    const r = await api.post("/api/delete", new URLSearchParams({ doc_id: d.doc_id }));
+    const rm = r.removed || {};
+    setText("#lib-result", `deleted '${d.filename}' — ${rm.chunks_removed ?? 0} chunks · `
+      + `${rm.vectors_removed ?? 0} embeddings`
+      + (rm.export_removed ? " · text export removed" : "")
+      + (rm.source_removed ? " · stored copy removed" : "")
+      + (rm.vector_error ? `\nvector purge error: ${rm.vector_error}` : ""));
+    await refresh(); await loadDocs();
+  } catch (e) { setText("#lib-result", `delete failed — ${e}`); }
+  finally { setBusy(false); }
 };
 $("#reset").onclick = async () => {
   if (!confirm("Delete ALL documents, chunks and vectors?\n\nThe knowledge-base file is backed up first.")) return;
   const r = await api.post("/api/reset", new URLSearchParams({ confirm: "RESET" }));
-  $("#rtable tbody").innerHTML = ""; $("#detail").textContent = "";
-  $("#citation").textContent = "";
+  $("#rtable tbody").innerHTML = "";
   log(r && r.backup ? `Knowledge base reset (backup kept at ${r.backup}).` : "Knowledge base reset.");
   await refresh(); loadDocs();
 };
@@ -420,43 +436,47 @@ $("#src-del").onclick = async () => {
 $("#src-scan").onclick = async () => {
   if (!state.srcSel) { setText("#src-result", "select a saved source first"); return; }
   setBusy(true); setText("#src-result", `scanning ${state.srcSel} …`);
-  const r = await api.post("/api/sources/scan", new URLSearchParams({ name: state.srcSel }));
-  setBusy(false);
-  if (!r.ok) { setText("#src-result", `scan failed — ${r.error}`); return; }
-  state.scan = r.files || [];
-  const tb = $("#stable tbody");
-  tb.innerHTML = "";
-  if (!state.scan.length) tb.innerHTML = `<tr><td colspan="4" class="hint">No PDFs found.</td></tr>`;
-  state.scan.forEach((f, i) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="pick"><input type="checkbox" data-i="${i}"></td>`
-      + `<td class="src">${esc(f.name)}</td>`
-      + `<td class="mono">${f.size ? (f.size / 1048576).toFixed(1) + " MB" : "—"}</td>`
-      + `<td class="mono">${esc(f.remote)}</td>`;
-    tb.appendChild(tr);
-  });
-  $("#src-count").textContent = `${state.scan.length} file(s)`;
-  $("#src-ingest").disabled = !state.scan.length;
-  setText("#src-result", `found ${state.scan.length} PDF(s) at ${state.srcSel}`);
+  try {
+    const r = await api.post("/api/sources/scan", new URLSearchParams({ name: state.srcSel }));
+    if (!r.ok) { setText("#src-result", `scan failed — ${r.error}`); return; }
+    state.scan = r.files || [];
+    const tb = $("#stable tbody");
+    tb.innerHTML = "";
+    if (!state.scan.length) tb.innerHTML = `<tr><td colspan="4" class="hint">No PDFs found.</td></tr>`;
+    state.scan.forEach((f, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="pick"><input type="checkbox" data-i="${i}"></td>`
+        + `<td class="src">${esc(f.name)}</td>`
+        + `<td class="mono">${f.size ? (f.size / 1048576).toFixed(1) + " MB" : "—"}</td>`
+        + `<td class="mono">${esc(f.remote)}</td>`;
+      tb.appendChild(tr);
+    });
+    $("#src-count").textContent = `${state.scan.length} file(s)`;
+    $("#src-ingest").disabled = !state.scan.length;
+    setText("#src-result", `found ${state.scan.length} PDF(s) at ${state.srcSel}`);
+  } catch (e) { setText("#src-result", `scan failed — ${e}`); }
+  finally { setBusy(false); }
 };
 $("#src-ingest").onclick = async () => {
   const picked = $$("#stable tbody input[type=checkbox]").filter((c) => c.checked)
     .map((c) => state.scan[+c.dataset.i].remote);
   if (!picked.length) { setText("#src-result", "tick at least one file"); return; }
   setBusy(true); setText("#src-result", `ingesting ${picked.length} file(s) …`);
-  const fd = new URLSearchParams({
-    name: state.srcSel, files: JSON.stringify(picked),
-    force: $("#src-force").checked ? "true" : "false",
-  });
-  const r = await api.post("/api/sources/ingest", fd);
-  setBusy(false);
-  if (!r.ok) { setText("#src-result", `ingest failed — ${r.error}`); return; }
-  const lines = (r.results || []).map((x) => x.status === "error"
-    ? `error: ${x.filename} — ${x.message}`
-    : `${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`);
-  setText("#src-log", lines.join("\n"));
-  setText("#src-result", `done — ${lines.length} file(s)`);
-  refresh(); loadDocs();
+  try {
+    const fd = new URLSearchParams({
+      name: state.srcSel, files: JSON.stringify(picked),
+      force: $("#src-force").checked ? "true" : "false",
+    });
+    const r = await api.post("/api/sources/ingest", fd);
+    if (!r.ok) { setText("#src-result", `ingest failed — ${r.error}`); return; }
+    const lines = (r.results || []).map((x) => x.status === "error"
+      ? `error: ${x.filename} — ${x.message}`
+      : `${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`);
+    setText("#src-log", lines.join("\n"));
+    setText("#src-result", `done — ${lines.length} file(s)`);
+    refresh(); loadDocs();
+  } catch (e) { setText("#src-result", `ingest failed — ${e}`); }
+  finally { setBusy(false); }
 };
 
 /* ---------------------------------------------------------- settings */
@@ -486,12 +506,12 @@ async function loadSettings() {
   if (!env.sentence_transformers.installed) cur += kv("to install", env.sentence_transformers.install_cmd);
   $("#s-current").innerHTML = cur;
 
+  state.lastSettings = r;          // the extractor note reads this — set it before filling
   renderModels(env.ollama.models || []);
   fillStorage(r);
   fillExtraction(r);
   state.libraries = r.libraries || [];
   renderLibraries(r.active_library);
-  state.lastSettings = r;
 }
 
 function renderModels(models) {
@@ -598,14 +618,16 @@ function renderLibraries(active) {
 async function useLibrary(name) {
   if (!confirm(`Switch to the library '${name}'?\n\nThe current knowledge base is backed up first.`)) return;
   setBusy(true);
-  const r = await api.post("/api/libraries/use", new URLSearchParams({ name }));
-  setBusy(false);
-  const st = r.stats || {};
-  setText("#lib-result", r.ok
-    ? `active library: ${r.active}\n${st.documents ?? 0} documents · ${st.chunks ?? 0} chunks · `
-      + `${st.vectors ?? 0} vectors · ${st.vector_backend || ""}`
-    : `switch failed — ${r.error}`);
-  await refresh(); await loadSettings(); await loadDocs(); await loadLibraries();
+  try {
+    const r = await api.post("/api/libraries/use", new URLSearchParams({ name }));
+    const st = r.stats || {};
+    setText("#lib-result", r.ok
+      ? `active library: ${r.active}\n${st.documents ?? 0} documents · ${st.chunks ?? 0} chunks · `
+        + `${st.vectors ?? 0} vectors · ${st.vector_backend || ""}`
+      : `switch failed — ${r.error}`);
+    await refresh(); await loadSettings(); await loadDocs(); await loadLibraries();
+  } catch (e) { setText("#lib-result", `switch failed — ${e}`); }
+  finally { setBusy(false); }
 }
 
 async function deleteLibrary(name) {
@@ -616,17 +638,19 @@ async function deleteLibrary(name) {
       + `its database and files on disk:\n${lib.data_dir || "(unknown location)"}\n\n`
       + `This cannot be undone.`)) return;
   setBusy(true);
-  const r = await api.post("/api/libraries/delete", new URLSearchParams({ name, purge: "1" }));
-  setBusy(false);
-  const p = r.purge || {};
-  setText("#lib-result", r.ok
-    ? `deleted '${name}'\n`
-      + (p.purged
-          ? `removed ${p.documents ?? "?"} documents · freed ${fmtBytes(p.freed_bytes)}\nfrom ${p.purged}`
-          : `nothing removed from disk — ${p.skipped || "unknown reason"}`)
-      + (p.error ? `\npurge error: ${p.error}` : "")
-    : `delete failed — ${r.error}`);
-  await loadLibraries(); await loadDocs(); await refresh();
+  try {
+    const r = await api.post("/api/libraries/delete", new URLSearchParams({ name, purge: "1" }));
+    const p = r.purge || {};
+    setText("#lib-result", r.ok
+      ? `deleted '${name}'\n`
+        + (p.purged
+            ? `removed ${p.documents ?? "?"} documents · freed ${fmtBytes(p.freed_bytes)}\nfrom ${p.purged}`
+            : `nothing removed from disk — ${p.skipped || "unknown reason"}`)
+        + (p.error ? `\npurge error: ${p.error}` : "")
+      : `delete failed — ${r.error}`);
+    await loadLibraries(); await loadDocs(); await refresh();
+  } catch (e) { setText("#lib-result", `delete failed — ${e}`); }
+  finally { setBusy(false); }
 }
 
 $("#lib-select").onchange = (e) => useLibrary(e.target.value);
@@ -647,12 +671,14 @@ function onScopeChange() {
   }
   localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
   updateScope();
+  rerunSearch(250);            // a different set of knowledge bases is a different search
 }
 
 $("#scope-all").onclick = () => {
   state.libs = state.libraries.map((l) => l.name);
   localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
   updateScope();
+  rerunSearch(250);
 };
 $("#scope-active").onclick = () => {
   const act = (state.libraries.find((l) => l.active) || {}).name;
@@ -660,6 +686,7 @@ $("#scope-active").onclick = () => {
     state.libs = [act];
     localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
     updateScope();
+    rerunSearch(250);
   }
 };
 $("#lib-add").onclick = async () => {
@@ -742,11 +769,24 @@ let jobDoneTimer = null;
 function jobBadge(s) {
   const el = $("#job-badge");
   const bar = $("#jobbar");
+  const ing = (s && s.ingest) || {};
+
+  // an ingest outranks everything: it is what the user is waiting for
+  if (ing.running) {
+    el.hidden = false;
+    el.dataset.kind = "ingest";
+    el.innerHTML = `<span class="dot"></span>indexing ${esc(ing.filename || "…")}`
+      + (ing.total > 1 ? ` · ${ing.index}/${ing.total}` : "")
+      + ` · ${ing.pct || 0}%`;
+    bar.classList.add("on");
+    return;
+  }
   if (!s || (!s.running && s.ok === null)) {
     el.hidden = true;
     bar.classList.remove("on");
     return;
   }
+  el.dataset.kind = "job";
   const pct = (s.lines || []).map((l) => (String(l).match(/(\d{1,3})\s*%/) || [])[1]).filter(Boolean).pop();
   el.hidden = false;
   if (s.running) {
@@ -763,13 +803,37 @@ function jobBadge(s) {
   }
 }
 
-/* one polling loop for any running install/pull, wherever the user is */
+/* the same progress, on the page that started it */
+function liveIngest(ing) {
+  const el = $("#ingest-live");
+  if (!el) return;
+  if (!ing || !ing.running) {
+    if (!ing || ing.done === null || ing.done === undefined) { el.hidden = true; return; }
+    const n = (ing.results || []).reduce((a, r) => a + (r.nchunks || 0), 0);
+    const bad = (ing.results || []).filter((r) => r.status === "error").length;
+    el.hidden = false;
+    el.textContent = `indexed ${n} chunks from ${(ing.results || []).length} file(s)`
+      + (bad ? ` — ${bad} failed` : "")
+      + (ing.done && ing.started ? `  ·  ${Math.round(ing.done - ing.started)}s` : "");
+    return;
+  }
+  el.hidden = false;
+  el.textContent = `${ing.detail || "working"}\n${ing.filename || ""}`
+    + (ing.total > 1 ? `  ·  file ${ing.index}/${ing.total}` : "")
+    + `  ·  ${ing.pct || 0}%`;
+  bar(ing.pct || 0);
+}
+
+/* one polling loop for any running install/pull/ingest, wherever the user is */
 async function watchJob() {
   clearTimeout(jobTimer);
   let s;
   try { s = await api.get("/api/settings/job"); } catch (e) { return; }
+  const wasIngesting = state.ingesting === true;
+  state.ingesting = !!(s.ingest && s.ingest.running);
   state.job = s;
   jobBadge(s);
+  liveIngest(s.ingest);
   const el = $("#job-log");
   if (el && (s.kind || (s.lines || []).length)) {
     el.hidden = false;
@@ -777,8 +841,10 @@ async function watchJob() {
       + (s.running ? "" : (s.ok ? "\n\ndone." : "\n\nfailed."));
     if ($("#panel-settings")?.classList.contains("is-active")) el.scrollTop = el.scrollHeight;
   }
-  if (s.running) jobTimer = setTimeout(watchJob, 1000);
+  if (s.running || state.ingesting) jobTimer = setTimeout(watchJob, 1000);
   else if (s.ok) loadSettings();
+  // it finished while the user was somewhere else — bring the lists up to date
+  if (wasIngesting && !state.ingesting) { refresh(); loadDocs(); }
 }
 
 $("#job-badge").onclick = () => {
@@ -792,8 +858,11 @@ function fillExtraction(r) {
   const s = r.settings, env = r.env || {};
   const xs = $("#x-extractor");
   if (!xs.dataset.filled) {
+    // never `disabled`: an extractor without its package is still selectable — the
+    // server falls back and says so, and refusing the click just looks broken
     xs.innerHTML = (env.extractors || []).map((e) =>
-      `<option value="${e.id}" ${e.available ? "" : "disabled"}>${esc(e.label)}${e.available ? "" : " — not installed"}</option>`).join("");
+      `<option value="${e.id}" data-ok="${e.available ? 1 : 0}">${esc(e.label)}`
+      + `${e.available ? "" : " — needs its package"}</option>`).join("");
     xs.dataset.filled = "1";
   }
   xs.value = s.extractor || "pymupdf";
@@ -802,18 +871,28 @@ function fillExtraction(r) {
   $("#x-extras").innerHTML =
     kv("docling", d.installed ? `installed${d.version ? " " + d.version : ""}` : "not installed")
     + (d.installed ? "" : kv("install", d.install_cmd || "python3 -m pip install docling"));
-  const chosen = (env.extractors || []).find((e) => e.id === xs.value);
-  const note = $("#x-note");
-  const needsInstall = chosen && !chosen.available;
-  note.hidden = !needsInstall && !(chosen && chosen.id === "docling");
-  note.innerHTML = (chosen && chosen.id === "docling"
-      ? "Docling is the default extractor. While it is not installed, ingestion falls back to "
-        + "PyMuPDF and says so in the log. "
-      : "")
-    + (needsInstall ? `Needs a package: <code>${esc(chosen.install)}</code>` : "");
+  xNote();
 }
 
-$("#x-extractor").onchange = () => { if (state.lastSettings) fillExtraction(state.lastSettings); };
+/* The note describes the extractor selected right now — so it is its own function:
+   folding it into the form filler made the dropdown snap back on every change. */
+function xNote() {
+  const env = (state.lastSettings || {}).env || {};
+  const d = env.docling || {};
+  const chosen = (env.extractors || []).find((e) => e.id === $("#x-extractor").value);
+  const note = $("#x-note");
+  note.hidden = !(chosen && chosen.id === "docling");
+  note.innerHTML = (chosen && chosen.id === "docling")
+    ? ((d.installed || chosen.available)
+        ? `Docling is the default extractor — installed${d.version ? ` ${esc(d.version)}` : ""}: `
+          + `layout- and table-aware, and it can OCR scans. The OCR switch below applies to it.`
+        : `Docling is the default extractor but is <b>not installed on this machine</b>: ingestion `
+          + `falls back to PyMuPDF and says so in the ingest log. Install it with `
+          + `<code>${esc(d.install_cmd || "python3 -m pip install docling")}</code>, then re-ingest.`)
+    : "";
+}
+
+$("#x-extractor").onchange = xNote;
 $("#x-save").onclick = async () => {
   const r = await api.post("/api/settings/save", new URLSearchParams({
     extractor: $("#x-extractor").value,
