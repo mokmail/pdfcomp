@@ -120,12 +120,20 @@ def extract_pages(path, extractor=None, ocr=False):
         raise FileNotFoundError(str(p))
 
     ext = (extractor or "pymupdf").lower()
+    note = ""
     if ext == "docling":
-        if not docling_available():
-            raise RuntimeError("docling is not installed — python3 -m pip install docling")
-        meta_extra, pages, npages = _extract_docling(p, ocr=ocr)
+        if docling_available():
+            meta_extra, pages, npages = _extract_docling(p, ocr=ocr)
+            used = "docling"
+        else:
+            # Docling is the preferred extractor, but it is an optional extra:
+            # never block ingestion on a missing package — use PyMuPDF and say so.
+            meta_extra, pages, npages = _extract_pymupdf(p)
+            used = "pymupdf"
+            note = ("docling is the preferred extractor but is not installed — "
+                    "used PyMuPDF (pip install docling to switch)")
     else:
-        ext = "pymupdf"
+        ext = used = "pymupdf"
         meta_extra, pages, npages = _extract_pymupdf(p)
 
     sha1 = _sha1_file(p)
@@ -136,7 +144,8 @@ def extract_pages(path, extractor=None, ocr=False):
         "npages": npages,
         "title": meta_extra.get("title", ""),
         "doc_id": sha1[:20],
-        "extractor": ext,
+        "extractor": used,
+        "extractor_note": note,
     }
     return meta, pages
 

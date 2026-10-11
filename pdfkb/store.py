@@ -152,7 +152,8 @@ class KB:
 
         texts = [c["text"] for c in chunks]
         say(1, 3, f"Embedding {len(texts)} chunks via {self.embedder.info()} "
-                  f"(extracted with {meta.get('extractor', 'pymupdf')})")
+                  f"(extracted with {meta.get('extractor', 'pymupdf')}"
+                  + (f" — {meta['extractor_note']}" if meta.get("extractor_note") else "") + ")")
         embs = self.embedder.embed(texts)
         dim = len(embs[0])
         stored = self._stored_dim()
@@ -201,7 +202,9 @@ class KB:
         self.export_text(meta["doc_id"])
 
         return {"doc_id": meta["doc_id"], "status": "added", "filename": meta["filename"],
-                "npages": meta["npages"], "nchunks": len(chunks), "dim": dim}
+                "npages": meta["npages"], "nchunks": len(chunks), "dim": dim,
+                "extractor": meta.get("extractor", "pymupdf"),
+                "extractor_note": meta.get("extractor_note", "")}
 
     # ------------------------------------------------------------ text export
     def export_path(self, doc_id):
@@ -358,6 +361,11 @@ class KB:
                 "data_dir": str(self.storage["data_dir"])}
 
     def delete_document(self, doc_id):
+        """Remove a document entirely: rows, chunks, FTS index, embeddings, export.
+
+        Returns a report so the caller can verify the purge really happened
+        instead of trusting a silent success.
+        """
         export = self.export_path(doc_id)
         ids = [r["chunk_id"] for r in self.conn.execute(
             "SELECT chunk_id FROM chunks WHERE doc_id=?", (doc_id,)).fetchall()]
@@ -366,16 +374,29 @@ class KB:
             self.conn.execute("DELETE FROM chunks_fts WHERE doc_id=?", (doc_id,))
         self.conn.execute("DELETE FROM documents WHERE doc_id=?", (doc_id,))
         self.conn.commit()
+
+        vector_error, vectors_removed, vectors_left = None, 0, None
         try:
+            before = self.vstore.count()
             self.vstore.delete(doc_id=doc_id, ids=ids)
-        except Exception:
-            pass
-        # don't leave an orphaned readable export behind
+            vectors_left = self.vstore.count()
+            vectors_removed = max(0, before - vectors_left)
+        except Exception as ex:  # noqa: BLE001 — report it, never fail silently
+            vector_error = f"{type(ex).__name__}: {ex}"
+
+        export_removed = False
         if export and Path(export).exists():
             try:
                 Path(export).unlink()
+                export_removed = True
             except OSError:
                 pass
+
+        left = self.conn.execute(
+            "SELECT COUNT(*) c FROM chunks WHERE doc_id=?", (doc_id,)).fetchone()["c"]
+        return {"doc_id": doc_id, "chunks_removed": len(ids), "chunks_left": left,
+                "vectors_removed": vectors_removed, "vectors_left": vectors_left,
+                "vector_error": vector_error, "export_removed": export_removed}
 
     def reset(self):
         """Wipe the whole knowledge base and vector store."""

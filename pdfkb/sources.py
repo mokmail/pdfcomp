@@ -67,7 +67,8 @@ def connectors():
     return [
         {"id": "local", "label": "Local folder / synced drive", "category": "On this machine",
          "available": True, "note": "a folder, including synced cloud drives",
-         "fields": [{"key": "path", "label": "folder path", "placeholder": "~/Documents"}]},
+         "fields": [{"key": "path", "label": "folder path", "placeholder": "~/Documents",
+                     "browse": "dir"}]},
 
         {"id": "http", "label": "HTTP directory", "category": "Network",
          "available": True, "note": "any page linking .pdf files",
@@ -146,6 +147,76 @@ def local_presets():
             out.append({**p, "resolved": expanded if os.path.isdir(expanded) else None,
                         "detected": os.path.isdir(expanded)})
     return out
+
+
+# ------------------------------------------------------------ folder picker
+# The server runs on the same machine as the browser, so a native OS picker is
+# the only way to hand back a real absolute path (a web page cannot read one).
+def picker_command(kind="dir", start=None):
+    """The native folder/file chooser for this machine, or None if there is none."""
+    import json as _json
+    import shutil as _shutil
+    import sys
+
+    start = os.path.expanduser(start) if start else None
+    if sys.platform == "darwin":
+        if kind == "file":
+            script = 'POSIX path of (choose file with prompt "Select a file"'
+        else:
+            script = 'POSIX path of (choose folder with prompt "Select a folder"'
+        if start and os.path.exists(start):
+            script += f" default location POSIX file {_json.dumps(start)}"
+        return ["osascript", "-e", script + ")"]
+    if _shutil.which("zenity"):
+        cmd = ["zenity", "--file-selection", "--title=Select a folder"]
+        if kind != "file":
+            cmd.append("--directory")
+        if start and os.path.exists(start):
+            cmd.append(f"--filename={start.rstrip('/')}/")
+        return cmd
+    if _shutil.which("kdialog"):
+        return (["kdialog", "--getopenfilename", start or os.path.expanduser("~")]
+                if kind == "file" else ["kdialog", "--getexistingdirectory", start or os.path.expanduser("~")])
+    return None
+
+
+def browse_info() -> dict:
+    """Can this machine show a native picker, and with what."""
+    import sys
+
+    cmd = picker_command("dir")
+    if not cmd:
+        return {"available": False, "backend": None,
+                "hint": "macOS ships osascript; Linux needs zenity or kdialog"}
+    return {"available": True, "backend": cmd[0],
+            "platform": sys.platform,
+            "hint": "the picker opens on the machine running the server"}
+
+
+def browse_path(kind="dir", start=None, dry=False) -> dict:
+    """Open the native picker and return the chosen path."""
+    import subprocess
+
+    cmd = picker_command(kind, start)
+    if cmd is None:
+        return {"ok": False, "kind": kind,
+                "error": "no native folder picker on this machine "
+                         "(macOS: osascript, Linux: zenity or kdialog)"}
+    if dry:                       # used by tests: never opens a dialog
+        return {"ok": True, "dry": True, "kind": kind, "command": cmd}
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "kind": kind, "cancelled": True, "error": "the picker timed out"}
+    if p.returncode != 0:
+        lines = [ln for ln in (p.stderr or "").splitlines() if ln.strip()]
+        cancelled = any("cancel" in ln.lower() or "-128" in ln for ln in lines)
+        return {"ok": False, "kind": kind, "cancelled": cancelled,
+                "error": "cancelled" if cancelled else (lines[-1] if lines else f"picker failed ({p.returncode})")}
+    path = (p.stdout or "").strip().rstrip("/") or "/"
+    if not os.path.exists(path):
+        return {"ok": False, "kind": kind, "error": f"that path no longer exists: {path}"}
+    return {"ok": True, "kind": kind, "path": path, "is_dir": os.path.isdir(path)}
 
 
 def providers():

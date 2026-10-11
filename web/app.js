@@ -13,6 +13,8 @@ const setText = (sel, txt) => { const el = $(sel); el.hidden = false; el.textCon
 const state = {
   results: [], cur: null, docs: [], selDoc: -1, busy: false,
   sources: [], connectors: [], srcSel: null, scan: [],
+  libraries: [],
+  libs: (() => { try { return JSON.parse(localStorage.getItem("pdfkb-libs") || "[]"); } catch (e) { return []; } })(),
 };
 
 /* ------------------------------------------------------------ theme */
@@ -50,7 +52,7 @@ function setBusy(b) {
   ["#go", "#pick-files", "#pick-folder", "#refresh", "#export", "#del", "#reset", "#open-any",
    "#s-save", "#s-test", "#p-install", "#s-refresh", "#i-install", "#x-save",
    "#src-test", "#src-save", "#src-scan", "#src-del", "#st-save", "#st-defaults", "#vt-test",
-   "#lib-add", "#lib-update", "#sp-save"]
+   "#lib-add", "#lib-update", "#sp-save", "#scope-all", "#scope-active"]
     .forEach((s) => { const el = $(s); if (el) el.disabled = b; });
 }
 
@@ -60,6 +62,13 @@ async function refresh() {
     $("#provider").textContent = s.provider;
     $("#status").textContent = `library ${s.library || "default"}  ·  documents ${s.documents}`
       + `  ·  chunks ${s.chunks}  ·  vectors ${s.vectors}  ·  ${s.vector_backend || ""}`;
+    const hint = $("#search-hint");
+    if (hint) {
+      hint.hidden = s.documents !== 0;
+      hint.textContent = s.documents === 0
+        ? "Nothing indexed in this library yet — open “Add PDFs” to ingest your first document."
+        : "";
+    }
   } catch (e) { $("#status").textContent = "API unavailable"; }
 }
 
@@ -78,7 +87,9 @@ async function ingest(files) {
     bar(100);
     (r.results || []).forEach((x) => log(x.status === "error"
       ? `  error: ${x.filename} — ${x.message}`
-      : `  ${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`));
+      : `  ${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`
+        + (x.extractor ? `  [${x.extractor}]` : "")
+        + (x.extractor_note ? `\n     note: ${x.extractor_note}` : "")));
     await refresh(); loadDocs();
   } catch (e) { log("  ingest failed: " + e); bar(0); }
   finally { setBusy(false); }
@@ -104,32 +115,41 @@ async function doSearch() {
   if (!q) return;
   const mode = $('input[name=mode]:checked').value;
   const k = Math.min(50, Math.max(1, parseInt($("#k").value, 10) || 10));
+  const scope = (state.libs && state.libs.length ? state.libs : []).join(",");
+  const field = $("#searchfield");
   setBusy(true);
+  field.classList.add("is-searching");
   try {
-    const r = await api.get(`/api/search?q=${encodeURIComponent(q)}&mode=${mode}&k=${k}`);
+    const r = await api.get(`/api/search?q=${encodeURIComponent(q)}&mode=${mode}&k=${k}`
+      + `&libraries=${encodeURIComponent(scope)}`);
     state.results = r.results || [];
     state.cur = null;
     const tb = $("#rtable tbody");
     tb.innerHTML = "";
     if (!state.results.length) {
-      tb.innerHTML = `<tr><td colspan="5" class="hint">No results — add PDFs first, or try another query.</td></tr>`;
+      tb.innerHTML = `<tr><td colspan="6" class="hint">No results — add PDFs first, try another query, or widen the search scope.</td></tr>`;
       $("#detail").textContent = ""; $("#citation").textContent = "";
       return;
     }
     state.results.forEach((h, i) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td class="mono">${i + 1}</td><td class="mono">${score(h)}</td>`
+        + `<td class="mono">${esc(h.library || "")}</td>`
         + `<td class="src">${esc(h.filename)}</td><td class="mono">${h.page}</td>`
         + `<td>${snip(h.text)}</td>`;
-      tr.onclick = () => select(i);
+      tr.onclick = () => { select(i); openResult(i); };
       tb.appendChild(tr);
     });
     select(0);
   } catch (e) { log("search failed: " + e); }
-  finally { setBusy(false); }
+  finally { setBusy(false); field.classList.remove("is-searching"); }
 }
 $("#go").onclick = doSearch;
-$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+$("#q").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  doSearch();                 // reads the value synchronously
+  $("#q").value = "";         // Enter clears the field, ready for the next query
+});
 
 async function select(i) {
   const h = state.results[i];
@@ -138,9 +158,11 @@ async function select(i) {
   $$("#rtable tbody tr").forEach((tr, j) => tr.classList.toggle("is-sel", j === i));
   $("#citation").textContent = "citation:  " + h.citation;
   $("#open").href = h.url;
-  let txt = `source  ${h.filename}   (page ${h.page})\nchunk   ${h.chunk_id}\n${"-".repeat(76)}\n${h.text}`;
+  let txt = `library ${h.library || "—"}\nsource  ${h.filename}   (page ${h.page})\n`
+    + `chunk   ${h.chunk_id}\n${"-".repeat(76)}\n${h.text}`;
   try {
-    const ctx = await api.get(`/api/context?doc_id=${encodeURIComponent(h.doc_id)}&page=${h.page}`);
+    const ctx = await api.get(`/api/context?doc_id=${encodeURIComponent(h.doc_id)}`
+      + `&page=${h.page}&library=${encodeURIComponent(h.library || "")}`);
     txt += `\n\n—— page ${h.page} context ——`;
     ctx.chunks.forEach((c) => { txt += `\n[p.${c.page}] ${(c.text || "").replace(/\s+/g, " ")}`; });
   } catch (e) { /* best-effort */ }
@@ -151,6 +173,63 @@ const copy = async (s) => { try { await navigator.clipboard.writeText(s); } catc
 $("#copy-cite").onclick = () => state.cur && copy(state.cur.citation);
 $("#copy-text").onclick = () => state.cur && copy(state.cur.text);
 
+/* --------------------------------------- result modal + document viewer */
+function openResult(i) {
+  const h = state.results[i];
+  if (!h) return;
+  state.cur = h;
+  const dlg = $("#rmodal");
+  $("#rmodal-crumb").textContent = `${h.library || "—"}  ·  page ${h.page}`;
+  $("#rmodal-title").textContent = h.filename || h.chunk_id;
+  $("#rmodal-text").textContent = h.text;
+  $("#rmodal-context").textContent = "loading page context…";
+  $("#rmodal-show").textContent = `Show in document (p.${h.page})`;
+  $("#rmodal-open").href = h.url;
+  $("#rmodal-note").textContent = `${h.library || "—"} · ${h.citation || ""}`;
+  $("#rmodal-show").textContent = `Reload at p.${h.page}`;
+  const frame = $("#rmodal-frame");
+  const hint = $("#rmodal-hint");
+  frame.hidden = false;                      // the original is always shown
+  hint.hidden = false;
+  hint.textContent = "loading the original document…";
+  frame.removeAttribute("src");
+  frame.onload = () => { hint.hidden = true; };
+  frame.onerror = () => {
+    hint.hidden = false;
+    hint.textContent = "The original could not be previewed here — use “Open in new tab”.";
+  };
+
+  if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); }
+  else dlg.setAttribute("open", "");
+
+  frame.setAttribute("src", h.url);          // …/api/pdf/<library>/<doc>#page=N
+
+  api.get(`/api/context?doc_id=${encodeURIComponent(h.doc_id)}&page=${h.page}`
+    + `&library=${encodeURIComponent(h.library || "")}`)
+    .then((ctx) => {
+      const t = (ctx.chunks || []).map((c) => `[p.${c.page}] ${(c.text || "").replace(/\s+/g, " ")}`).join("\n");
+      $("#rmodal-context").textContent = t || "(no neighbouring text on this page)";
+    })
+    .catch(() => { $("#rmodal-context").textContent = "(context unavailable)"; });
+}
+
+$("#rmodal-show").onclick = () => {
+  const h = state.cur;
+  if (!h) return;
+  const frame = $("#rmodal-frame");
+  const hint = $("#rmodal-hint");
+  frame.removeAttribute("src");
+  frame.hidden = false;
+  frame.onload = () => { hint.hidden = true; };
+  hint.hidden = false;
+  hint.textContent = "reloading the original…";
+  frame.setAttribute("src", h.url);          // …/api/pdf/<library>/<doc>#page=N
+};
+$("#rmodal-close").onclick = () => $("#rmodal").close();
+$("#rmodal").addEventListener("click", (e) => { if (e.target === $("#rmodal")) $("#rmodal").close(); });
+$("#rmodal-cite").onclick = () => state.cur && copy(state.cur.citation);
+$("#rmodal-text-copy").onclick = () => state.cur && copy(state.cur.text);
+
 /* ----------------------------------------------------------- library */
 const fmtDate = (t) => t ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
 
@@ -159,6 +238,11 @@ async function loadDocs() {
     const r = await api.get("/api/documents");
     state.docs = r.documents || [];
     state.selDoc = state.docs.length ? 0 : -1;
+    const cur = $("#lib-current");
+    if (cur) {
+      const act = state.libraries.find((l) => l.active);
+      cur.textContent = act ? `${act.name}  (${act.backend})` : "—";
+    }
     const tb = $("#dtable tbody");
     tb.innerHTML = "";
     if (!state.docs.length) tb.innerHTML = `<tr><td colspan="5" class="hint">Nothing indexed yet.</td></tr>`;
@@ -187,10 +271,29 @@ $("#export").onclick = async () => {
   const r = await api.post("/api/export", new URLSearchParams({ doc_id: d.doc_id }));
   alert("Written:\n" + r.path);
 };
+function fmtBytes(n) {
+  const v0 = Number(n) || 0;
+  if (v0 <= 0) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0, v = v0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+}
 $("#del").onclick = async () => {
   const d = curDoc(); if (!d) return;
-  if (!confirm(`Remove '${d.filename}' from the knowledge base?`)) return;
-  await api.post("/api/delete", new URLSearchParams({ doc_id: d.doc_id }));
+  const n = d.chunks ?? d.nchunks ?? "its";
+  if (!confirm(`Remove '${d.filename}' from the knowledge base?\n\n`
+      + `${n} chunks and their embeddings are deleted as well, together with the `
+      + `stored copy of the file.`)) return;
+  setBusy(true);
+  const r = await api.post("/api/delete", new URLSearchParams({ doc_id: d.doc_id }));
+  setBusy(false);
+  const rm = r.removed || {};
+  setText("#lib-result", `deleted '${d.filename}' — ${rm.chunks_removed ?? 0} chunks · `
+    + `${rm.vectors_removed ?? 0} embeddings`
+    + (rm.export_removed ? " · text export removed" : "")
+    + (rm.source_removed ? " · stored copy removed" : "")
+    + (rm.vector_error ? `\nvector purge error: ${rm.vector_error}` : ""));
   await refresh(); loadDocs();
 };
 $("#reset").onclick = async () => {
@@ -216,11 +319,48 @@ function renderSrcFields(type) {
   if (!c) { el.innerHTML = ""; return; }
   el.innerHTML = (c.fields || []).map((f) => `
     <label class="field"><span>${esc(f.label || f.key)}</span>
-      <input id="sf-${esc(f.key)}" data-key="${esc(f.key)}"
-             type="${f.secret ? "password" : "text"}" spellcheck="false" autocomplete="off"
-             placeholder="${esc(f.placeholder || "")}"></label>`).join("")
+      <span class="inputrow">
+        <input id="sf-${esc(f.key)}" data-key="${esc(f.key)}"
+               type="${f.secret ? "password" : "text"}" spellcheck="false" autocomplete="off"
+               placeholder="${esc(f.placeholder || "")}">
+        ${f.browse ? `<button class="btn browse" type="button"
+             data-target="sf-${esc(f.key)}" data-kind="${esc(f.browse)}">Browse…</button>` : ""}
+      </span></label>`).join("")
     + (c.available ? "" : `<div class="notice">Needs a package: <code>${esc(c.install || "")}</code></div>`);
+  wireBrowseButtons(el);
 }
+
+/* Pick a folder with the machine's own dialog — the server runs on this Mac,
+   so it can hand back a real absolute path (a web page cannot read one). */
+function pickFolder(targetId, kind, btn) {
+  const inp = document.getElementById(targetId);
+  if (!inp) return;
+  const section = btn && btn.closest("section");
+  const out = section && section.id === "panel-settings" ? "#st-note" : "#src-result";
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "waiting…"; }
+  api.post("/api/sources/browse", new URLSearchParams({ kind: kind || "dir", start: inp.value.trim() }))
+    .then((r) => {
+      if (r.ok) {
+        inp.value = r.path;
+        setText(out, (r.is_dir === false ? "selected file: " : "selected folder: ") + r.path);
+      } else {
+        setText(out, r.cancelled ? "folder picker cancelled" : `folder picker: ${r.error}`);
+      }
+    })
+    .catch((e) => setText(out, "folder picker failed: " + e))
+    .finally(() => { if (btn) { btn.disabled = false; btn.textContent = label; } });
+}
+
+function wireBrowseButtons(scope) {
+  const nodes = scope ? scope.querySelectorAll("button.browse") : document.querySelectorAll("button.browse");
+  nodes.forEach((b) => {
+    if (b.dataset.wired) return;
+    b.dataset.wired = "1";
+    b.onclick = () => pickFolder(b.dataset.target, b.dataset.kind || "dir", b);
+  });
+}
+wireBrowseButtons();
 
 const srcForm = () => {
   const fd = new URLSearchParams();
@@ -427,6 +567,18 @@ function renderLibraries(active) {
   $("#lib-select").innerHTML = state.libraries.map((l) =>
     `<option value="${esc(l.name)}" ${l.active ? "selected" : ""}>${esc(l.name)}`
     + `${l.documents != null ? ` · ${l.documents}` : ""}</option>`).join("");
+
+  // --- search scope: which knowledge bases a query looks in
+  const names = state.libraries.map((l) => l.name);
+  state.libs = (state.libs || []).filter((n) => names.includes(n));
+  if (!state.libs.length) state.libs = [active || names[0]];
+  $("#scope-list").innerHTML = state.libraries.map((l) => `
+    <label><input type="checkbox" value="${esc(l.name)}">
+      <span>${esc(l.name)}${l.active ? "  ✓" : ""}</span>
+      <span class="micro">${l.documents != null ? l.documents : "—"}</span></label>`).join("");
+  $$("#scope-list input[type=checkbox]").forEach((c) => (c.onchange = onScopeChange));
+  updateScope();
+
   const tb = $("#libtable tbody");
   tb.innerHTML = state.libraries.map((l) => `
     <tr data-name="${esc(l.name)}">
@@ -457,13 +609,59 @@ async function useLibrary(name) {
 }
 
 async function deleteLibrary(name) {
-  if (!confirm(`Delete the library '${name}'?\n\nIts files on disk are left alone.`)) return;
-  const r = await api.post("/api/libraries/delete", new URLSearchParams({ name }));
-  setText("#lib-result", r.ok ? `deleted '${name}'` : `delete failed — ${r.error}`);
-  await loadLibraries();
+  const lib = (state.libraries || []).find((l) => l.name === name) || {};
+  const n = lib.documents == null ? "its" : `${lib.documents}`;
+  if (!confirm(`Delete the knowledge base '${name}'?\n\n`
+      + `This removes ${n} documents with all their text, chunks and embeddings, and deletes `
+      + `its database and files on disk:\n${lib.data_dir || "(unknown location)"}\n\n`
+      + `This cannot be undone.`)) return;
+  setBusy(true);
+  const r = await api.post("/api/libraries/delete", new URLSearchParams({ name, purge: "1" }));
+  setBusy(false);
+  const p = r.purge || {};
+  setText("#lib-result", r.ok
+    ? `deleted '${name}'\n`
+      + (p.purged
+          ? `removed ${p.documents ?? "?"} documents · freed ${fmtBytes(p.freed_bytes)}\nfrom ${p.purged}`
+          : `nothing removed from disk — ${p.skipped || "unknown reason"}`)
+      + (p.error ? `\npurge error: ${p.error}` : "")
+    : `delete failed — ${r.error}`);
+  await loadLibraries(); await loadDocs(); await refresh();
 }
 
 $("#lib-select").onchange = (e) => useLibrary(e.target.value);
+
+/* ------------------------------------------------------- search scope */
+function updateScope() {
+  const total = state.libraries.length || 1;
+  $("#scope-count").textContent = state.libs.length >= total
+    ? `all ${total}` : `${state.libs.length}/${total}`;
+  $$("#scope-list input[type=checkbox]").forEach((c) => { c.checked = state.libs.includes(c.value); });
+}
+
+function onScopeChange() {
+  state.libs = $$("#scope-list input:checked").map((x) => x.value);
+  if (!state.libs.length) {
+    const act = (state.libraries.find((l) => l.active) || {}).name || state.libraries[0].name;
+    state.libs = [act];
+  }
+  localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
+  updateScope();
+}
+
+$("#scope-all").onclick = () => {
+  state.libs = state.libraries.map((l) => l.name);
+  localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
+  updateScope();
+};
+$("#scope-active").onclick = () => {
+  const act = (state.libraries.find((l) => l.active) || {}).name;
+  if (act) {
+    state.libs = [act];
+    localStorage.setItem("pdfkb-libs", JSON.stringify(state.libs));
+    updateScope();
+  }
+};
 $("#lib-add").onclick = async () => {
   const name = $("#lib-name").value.trim();
   if (!name) { setText("#lib-result", "give the library a name first"); return; }
@@ -606,9 +804,13 @@ function fillExtraction(r) {
     + (d.installed ? "" : kv("install", d.install_cmd || "python3 -m pip install docling"));
   const chosen = (env.extractors || []).find((e) => e.id === xs.value);
   const note = $("#x-note");
-  note.hidden = !(chosen && !chosen.available);
-  note.innerHTML = chosen && !chosen.available
-    ? `The selected extractor needs a package: <code>${esc(chosen.install)}</code>` : "";
+  const needsInstall = chosen && !chosen.available;
+  note.hidden = !needsInstall && !(chosen && chosen.id === "docling");
+  note.innerHTML = (chosen && chosen.id === "docling"
+      ? "Docling is the default extractor. While it is not installed, ingestion falls back to "
+        + "PyMuPDF and says so in the log. "
+      : "")
+    + (needsInstall ? `Needs a package: <code>${esc(chosen.install)}</code>` : "");
 }
 
 $("#x-extractor").onchange = () => { if (state.lastSettings) fillExtraction(state.lastSettings); };
@@ -664,3 +866,4 @@ loadSettings();
 loadSources();
 loadLibraries();
 watchJob();          // picks up an install/pull already running
+setTimeout(() => { try { $("#q").focus(); } catch (e) {} }, 350);   // ready to type

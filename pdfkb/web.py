@@ -44,6 +44,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MASK = "••••••"
 
 _kb: KB | None = None
+_kbs: dict = {}          # non-active libraries, opened on demand for cross-library search
 _job = {"kind": None, "target": None, "lines": [], "ok": None, "running": False}
 _lock = threading.Lock()
 
@@ -55,9 +56,24 @@ def kb() -> KB:
     return _kb
 
 
+def _kb_for(lib: str) -> KB:
+    """The KB for a named library (the active one is the cached default)."""
+    if not lib or lib == prefs.active_library():
+        return kb()
+    with _lock:
+        if lib not in _kbs:
+            cfg = prefs.libraries_map().get(lib)
+            if cfg is None:
+                raise KeyError(f"unknown library: {lib}")
+            _kbs[lib] = KB(storage=prefs.storage(cfg))
+        return _kbs[lib]
+
+
 def reload_kb():
     global _kb
     _kb = None
+    with _lock:
+        _kbs.clear()
 
 
 # ---------------------------------------------------------------- helpers
@@ -74,11 +90,48 @@ def _stored_dim():
     return kb()._stored_dim()
 
 
-def _hit(h: dict) -> dict:
+def _hit(h: dict, lib: str | None = None) -> dict:
     h = dict(h)
-    h["url"] = f"/api/pdf/{h['doc_id']}#page={h['page']}"
+    lib = lib or h.get("library") or prefs.active_library()
+    h["library"] = lib
+    # the URL carries the library, so a hit always opens the copy it came from
+    h["url"] = f"/api/pdf/{lib}/{h['doc_id']}#page={h['page']}"
     h.pop("path", None)
     return h
+
+
+def _resolve_libs(asked):
+    """Keep only known libraries; fall back to the active one."""
+    known = {l["name"] for l in prefs.libraries_list()}
+    libs = [x for x in (asked or []) if x in known]
+    return libs or [prefs.active_library()]
+
+
+def _search_multi(q, mode, k, libs):
+    """Search one or several libraries and merge the ranked lists."""
+    if len(libs) == 1:
+        return [_hit(h, libs[0]) for h in _kb_for(libs[0]).search(q, k=k, mode=mode)]
+
+    per = {}
+    for lib in libs:
+        try:
+            per[lib] = _kb_for(lib).search(q, k=max(k, 10), mode=mode)
+        except Exception:  # noqa: BLE001  (a broken library must not kill the search)
+            per[lib] = []
+
+    # scores from different stores/models are not comparable — fuse by rank
+    merged = {}
+    for lib, hits in per.items():
+        for rank, h in enumerate(hits):
+            key = (lib, h["chunk_id"])
+            entry = merged.get(key)
+            if entry is None:
+                entry = merged[key] = {**h, "library": lib, "_rrf": 0.0}
+            entry["_rrf"] += 1.0 / (60 + rank + 1)
+    out = sorted(merged.values(), key=lambda x: x["_rrf"], reverse=True)[:k]
+    for h in out:
+        h["score"] = h.pop("_rrf", 0.0)
+    return [_hit(h, h.get("library")) for h in out]
 
 
 def _save_bytes(filename, data: bytes) -> Path:
@@ -170,20 +223,28 @@ async def search(request: Request):
         k = int(request.query_params.get("k", 10))
     except (TypeError, ValueError):
         k = 10
+    k = max(1, min(k, 50))
+    asked = [x.strip() for x in (request.query_params.get("libraries") or "").split(",") if x.strip()]
+    libs = await run_in_threadpool(_resolve_libs, asked)
     if not q:
-        return JSONResponse({"query": q, "mode": mode, "results": []})
-    hits = await run_in_threadpool(kb().search, q, max(1, min(k, 50)), mode)
-    return JSONResponse({"query": q, "mode": mode, "results": [_hit(h) for h in hits]})
+        return JSONResponse({"query": q, "mode": mode, "libraries": libs, "results": []})
+    hits = await run_in_threadpool(_search_multi, q, mode, k, libs)
+    return JSONResponse({"query": q, "mode": mode, "libraries": libs, "results": hits})
 
 
 async def context(request: Request):
     doc_id = request.query_params.get("doc_id", "")
+    lib = request.query_params.get("library", "")
     try:
         page = int(request.query_params.get("page", 1))
     except (TypeError, ValueError):
         page = 1
-    chunks = await run_in_threadpool(kb().page_context, doc_id, page)
-    return JSONResponse({"page": page, "chunks": chunks})
+    try:
+        k = await run_in_threadpool(_kb_for, lib)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"page": page, "chunks": [], "error": f"unknown library: {lib}"})
+    chunks = await run_in_threadpool(k.page_context, doc_id, page)
+    return JSONResponse({"page": page, "library": lib or prefs.active_library(), "chunks": chunks})
 
 
 async def pdf(request: Request):
@@ -198,20 +259,44 @@ async def pdf(request: Request):
                         headers={"Content-Disposition": f'inline; filename="{row["filename"]}"'})
 
 
+async def pdf_in_library(request: Request):
+    """Serve a source PDF out of a specific library (cross-library results)."""
+    lib = request.path_params["library"]
+    doc_id = request.path_params["doc_id"]
+    try:
+        k = await run_in_threadpool(_kb_for, lib)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"detail": f"unknown library: {lib}"}, status_code=404)
+    row = await run_in_threadpool(
+        lambda: k.conn.execute("SELECT path,filename FROM documents WHERE doc_id=?", (doc_id,)).fetchone())
+    if not row:
+        return JSONResponse({"detail": "document not found"}, status_code=404)
+    p = Path(row["path"])
+    if not p.exists():
+        return JSONResponse({"detail": "source file missing"}, status_code=404)
+    return FileResponse(str(p), media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{row["filename"]}"'})
+
+
 async def delete(request: Request):
+    """Delete a document and everything derived from it."""
     form = await request.form()
     doc_id = str(form.get("doc_id", ""))
     row = await run_in_threadpool(_pdf_row, doc_id)
-    await run_in_threadpool(kb().delete_document, doc_id)
+    report = await run_in_threadpool(kb().delete_document, doc_id)
+    source_removed = False
     if row:
         p = Path(row["path"])
         try:
             # resolve() both sides: /var and /private/var differ on macOS
             if p.parent.resolve() == Path(prefs.storage()["sources_dir"]).resolve() and p.exists():
                 p.unlink()
+                source_removed = True
         except OSError:
             pass
-    return JSONResponse({"ok": True, "stats": await run_in_threadpool(_stats)})
+    report["source_removed"] = source_removed
+    return JSONResponse({"ok": True, "removed": report,
+                         "stats": await run_in_threadpool(_stats)})
 
 
 async def reset(request: Request):
@@ -433,13 +518,24 @@ async def libraries_use(request: Request):
 
 
 async def libraries_delete(request: Request):
+    """Delete a knowledge base and, by default, every file it holds on disk."""
     form = await request.form()
+    name = str(form.get("name", "")).strip()
+    purge = str(form.get("purge", "1")).lower() not in ("0", "false", "no")
     try:
-        await run_in_threadpool(prefs.delete_library, str(form.get("name", "")))
-        return JSONResponse({"ok": True,
-                             "libraries": await run_in_threadpool(prefs.libraries_list)})
+        report = await run_in_threadpool(prefs.delete_library, name, purge)
     except Exception as ex:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": f"{type(ex).__name__}: {ex}"})
+    # drop the cached handle before its files disappear, so nothing keeps them alive
+    cached = _kbs.pop(name, None)
+    conn = getattr(cached, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return JSONResponse({"ok": True, "purge": report,
+                         "libraries": await run_in_threadpool(prefs.libraries_list)})
 
 
 # ---------------------------------------------------------------- sources
@@ -450,8 +546,21 @@ async def sources_list(request: Request):
         "connectors": sources.connectors(),
         "providers": sources.providers(),
         "local_presets": await run_in_threadpool(sources.local_presets),
+        "browse": await run_in_threadpool(sources.browse_info),
         "file": str(sources.INTEGRATIONS),
     })
+
+
+async def sources_browse(request: Request):
+    """Open the OS folder picker on the machine that runs the server."""
+    form = await request.form()
+    kind = str(form.get("kind", "dir"))
+    start = str(form.get("start", "")).strip() or None
+    dry = str(form.get("dry", "")).lower() in ("1", "true", "yes")
+    try:
+        return JSONResponse(await run_in_threadpool(sources.browse_path, kind, start, dry))
+    except Exception as ex:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"{type(ex).__name__}: {ex}"})
 
 
 async def sources_put(request: Request):
@@ -561,6 +670,7 @@ routes = [
     Route("/api/ingest", ingest, methods=["POST"]),
     Route("/api/search", search),
     Route("/api/context", context),
+    Route("/api/pdf/{library}/{doc_id}", pdf_in_library),
     Route("/api/pdf/{doc_id}", pdf),
     Route("/api/delete", delete, methods=["POST"]),
     Route("/api/reset", reset, methods=["POST"]),
@@ -582,6 +692,7 @@ routes = [
     Route("/api/sources/save", sources_save, methods=["POST"]),
     Route("/api/sources/delete", sources_delete, methods=["POST"]),
     Route("/api/sources/test", sources_test, methods=["POST"]),
+    Route("/api/sources/browse", sources_browse, methods=["POST"]),
     Route("/api/sources/scan", sources_scan, methods=["POST"]),
     Route("/api/sources/ingest", sources_ingest, methods=["POST"]),
     Route("/api/sources/put", sources_put, methods=["POST"]),

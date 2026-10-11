@@ -12,6 +12,7 @@ target knowledge bases and switch between them.
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -25,7 +26,7 @@ DEFAULTS = {
     "model": "",                 # empty -> provider default
     "ollama_url": config.OLLAMA_URL,
     # --- extraction ---
-    "extractor": "pymupdf",      # pymupdf | docling
+    "extractor": "docling",      # docling (preferred) | pymupdf — falls back with a note
     "docling_ocr": "false",      # docling: OCR scanned pages
     # --- storage (blank = derived from data_dir) ---
     "data_dir": str(config.DATA_DIR),
@@ -235,10 +236,85 @@ def use_library(name: str) -> dict:
     return save(data)
 
 
-def delete_library(name: str) -> dict:
+def _looks_like_kb(d: Path) -> bool:
+    """Only ever remove a directory that really holds a knowledge base."""
+    if not d.is_dir():
+        return False
+    return any((d / n).exists()
+               for n in ("kb.sqlite", "chroma", "text", "sources", "settings.json"))
+
+
+def _count_documents(sqlite_path: Path):
+    try:
+        c = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+        try:
+            return c.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        finally:
+            c.close()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _dir_size(d: Path) -> int:
+    total = 0
+    for p in d.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def delete_library(name: str, purge: bool = True) -> dict:
+    """Delete a library — and, by default, everything it holds on disk.
+
+    That is the knowledge-base file, the vector store, the exported text and the
+    stored copies of the sources. Refuses the active library, refuses any
+    directory another library (or the live settings) still points at, and only
+    removes a directory that actually looks like a knowledge base.
+    """
+    name = (name or "").strip()
     s = load()
     libs = libraries_map()
     if name == (s.get("active_library") or "default"):
-        raise ValueError("cannot delete the active library — switch to another first")
+        raise ValueError("cannot delete the active knowledge base — switch to another first")
+    cfg = libs.get(name)
+    if cfg is None:
+        raise KeyError(f"unknown library: {name}")
+
+    st = _resolve(cfg)
+    target = Path(st["data_dir"]).expanduser().resolve()
+
     libs.pop(name, None)
-    return save({"libraries": libs})
+    save({"libraries": libs})      # forget it first: it can no longer be switched to
+
+    report = {"library": name, "purged": None, "skipped": None, "documents": None,
+              "freed_bytes": 0, "error": None}
+    if not purge:
+        report["skipped"] = "purge was not requested"
+        return report
+
+    # never take out a directory someone else is still using — the live one included
+    in_use = {Path(_resolve(c)["data_dir"]).expanduser().resolve() for c in libs.values()}
+    in_use.add(Path(storage(load())["data_dir"]).expanduser().resolve())
+    in_use.discard(target)
+    if target in {Path(_resolve(c)["data_dir"]).expanduser().resolve() for c in libs.values()} \
+            or target == Path(storage(load())["data_dir"]).expanduser().resolve():
+        report["skipped"] = "another knowledge base still uses this directory"
+        return report
+    if any(target in t.parents for t in in_use):
+        report["skipped"] = "a live knowledge base lives inside this directory"
+        return report
+    if not _looks_like_kb(target):
+        report["skipped"] = "nothing that looks like a knowledge base on disk"
+        return report
+
+    report["documents"] = _count_documents(Path(st["sqlite_path"]))
+    report["freed_bytes"] = _dir_size(target)
+    try:
+        shutil.rmtree(target)
+        report["purged"] = str(target)
+    except OSError as ex:  # noqa: BLE001
+        report["error"] = f"{type(ex).__name__}: {ex}"
+    return report

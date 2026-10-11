@@ -27,8 +27,8 @@
     </div>
   </div>
   <nav class="tabs" aria-label="Tool sections">
-    <button class="tab is-active" data-panel="add" type="button">Add PDFs</button>
-    <button class="tab" data-panel="search" type="button">Search</button>
+    <button class="tab is-active" data-panel="search" type="button">Search</button>
+    <button class="tab" data-panel="add" type="button">Add PDFs</button>
     <button class="tab" data-panel="sources" type="button">Sources</button>
     <button class="tab" data-panel="settings" type="button">Settings</button>
     <button class="tab" data-panel="library" type="button">Library</button>
@@ -37,15 +37,10 @@
 </header>
 
 <main class="container">
-  <div class="hero">
-    <p class="micro">extract · embed · retrieve</p>
-    <h1>PDF Knowledge Base</h1>
-    <p class="sub">Extract · embed · search — every hit traceable to its source page</p>
-  </div>
 
   <!-- ------------------------------------------------------------ add -->
-  <section class="panel is-active" id="panel-add">
-    <p class="micro">Step 01 — Ingest</p>
+  <section class="panel" id="panel-add">
+    <p class="micro">Step 02 — Ingest</p>
     <h2>Add PDFs to the knowledge base</h2>
     <p class="lead">Each PDF is converted to text per page, split into overlapping chunks, and
       stored twice: as text in a SQLite knowledge base and as embeddings in a vector store.
@@ -69,25 +64,46 @@
   </section>
 
   <!-- --------------------------------------------------------- search -->
-  <section class="panel" id="panel-search">
-    <p class="micro">Step 02 — Retrieve</p>
-    <h2>Search the extracted content</h2>
+  <section class="panel is-active" id="panel-search">
+    <div class="search-hero">
+      <p class="micro">Step 01 — Retrieve</p>
+      <h1>Ask your documents.</h1>
+      <p class="sub">Hybrid semantic + keyword search across every PDF in this library —
+        each hit traceable to its source page.</p>
 
-    <div class="searchrow">
-      <input id="q" type="search" placeholder="Ask the knowledge base…" autocomplete="off">
-      <button class="btn primary" id="go" type="button">Search</button>
-    </div>
+      <div class="searchfield" id="searchfield">
+        <span class="searchfield-glow" aria-hidden="true"></span>
+        <span class="searchfield-ring" aria-hidden="true"></span>
+        <span class="searchfield-icon" aria-hidden="true">✦</span>
+        <input id="q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Ask anything across your documents…"
+               aria-label="search the knowledge base">
+        <button class="btn primary search-go" id="go" type="button">Search</button>
+      </div>
 
-    <div class="opts">
-      <label class="check"><input type="radio" name="mode" value="hybrid" checked> Hybrid</label>
-      <label class="check"><input type="radio" name="mode" value="semantic"> Semantic</label>
-      <label class="check"><input type="radio" name="mode" value="keyword"> Keyword</label>
-      <span class="micro">Results</span>
-      <input id="k" type="number" min="1" max="50" value="10">
+      <div class="opts center">
+        <label class="check"><input type="radio" name="mode" value="hybrid" checked> Hybrid</label>
+        <label class="check"><input type="radio" name="mode" value="semantic"> Semantic</label>
+        <label class="check"><input type="radio" name="mode" value="keyword"> Keyword</label>
+        <details class="scope" id="scope">
+          <summary>search within · <b id="scope-count">1</b> ▾</summary>
+          <div class="scope-menu">
+            <p class="micro">knowledge bases</p>
+            <div id="scope-list"></div>
+            <div class="scope-actions">
+              <button class="btn ghost" id="scope-all" type="button">All</button>
+              <button class="btn ghost" id="scope-active" type="button">Active only</button>
+            </div>
+          </div>
+        </details>
+        <span class="micro">Results</span>
+        <input id="k" type="number" min="1" max="50" value="10">
+      </div>
+      <p class="hint" id="search-hint" hidden></p>
     </div>
 
     <table id="rtable">
-      <thead><tr><th>#</th><th>Score</th><th>Source</th><th>Page</th><th>Snippet</th></tr></thead>
+      <thead><tr><th>#</th><th>Score</th><th>Library</th><th>Source</th><th>Page</th><th>Snippet</th></tr></thead>
       <tbody></tbody>
     </table>
 
@@ -237,25 +253,6 @@
       </div>
     </div>
 
-    <h2 style="margin-top:34px">Libraries — target knowledge bases</h2>
-    <p class="lead">Each library is a named storage profile: its own knowledge-base file, vector
-      store and exports. Switch the active library to search a different collection; the current
-      knowledge base is backed up on every switch.</p>
-
-    <table id="libtable">
-      <thead><tr><th>Name</th><th>Backend</th><th>Documents</th><th>Location</th><th class="pick"></th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="actions">
-      <input id="lib-name" type="text" spellcheck="false" placeholder="library name"
-             style="padding:10px 12px;background:rgb(var(--bg-void));color:rgb(var(--text-ghost));
-                    border:1px solid rgb(var(--line-hi));border-radius:2px;
-                    font-family:var(--font-mono);font-size:12.5px">
-      <button class="btn" id="lib-add" type="button">Save these settings as a library</button>
-      <button class="btn" id="lib-update" type="button">Update the active library</button>
-    </div>
-    <pre class="log" id="lib-result" hidden></pre>
-
     <h2 style="margin-top:34px">Storage</h2>
     <p class="lead">Where the knowledge base, the vector store and the exported text live.
       Applying new storage points the app at that location (opening an existing knowledge base
@@ -265,7 +262,10 @@
       <div class="grid2">
         <div>
           <label class="field"><span>data directory (root)</span>
-            <input id="st-data" type="text" spellcheck="false"></label>
+            <span class="inputrow">
+              <input id="st-data" type="text" spellcheck="false">
+              <button class="btn browse" type="button" data-target="st-data" data-kind="dir">Browse…</button>
+            </span></label>
           <label class="field"><span>knowledge base file (sqlite)</span>
             <input id="st-sqlite" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/kb.sqlite"></label>
           <label class="field"><span>vector backend</span>
@@ -283,9 +283,15 @@
           <label class="field"><span>vector collection name</span>
             <input id="st-vcoll" type="text" spellcheck="false"></label>
           <label class="field"><span>text exports directory</span>
-            <input id="st-text" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/text"></label>
+            <span class="inputrow">
+              <input id="st-text" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/text">
+              <button class="btn browse" type="button" data-target="st-text" data-kind="dir">Browse…</button>
+            </span></label>
           <label class="field"><span>source copies directory</span>
-            <input id="st-sources" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/sources"></label>
+            <span class="inputrow">
+              <input id="st-sources" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/sources">
+              <button class="btn browse" type="button" data-target="st-sources" data-kind="dir">Browse…</button>
+            </span></label>
           <div class="actions">
             <button class="btn primary" id="st-save" type="button">Apply storage</button>
             <button class="btn" id="vt-test" type="button">Test vector store</button>
@@ -304,7 +310,24 @@
   <!-- -------------------------------------------------------- library -->
   <section class="panel" id="panel-library">
     <p class="micro">Step 05 — Manage</p>
-    <h2>Indexed documents</h2>
+    <h2>Knowledge bases</h2>
+    <p class="lead">Each knowledge base is a named storage profile: its own knowledge-base file,
+      vector store and exports. Switch the active one to search or ingest into a different
+      collection; the current knowledge base is backed up on every switch.</p>
+
+    <table id="libtable">
+      <thead><tr><th>Name</th><th>Backend</th><th>Documents</th><th>Location</th><th class="pick"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="actions">
+      <input id="lib-name" type="text" spellcheck="false" placeholder="new knowledge base name" class="picker">
+      <button class="btn" id="lib-add" type="button">Save these settings as a knowledge base</button>
+      <button class="btn" id="lib-update" type="button">Update the active one</button>
+    </div>
+    <pre class="log" id="lib-result" hidden></pre>
+
+    <h2 style="margin-top:34px">Indexed documents</h2>
+    <p class="micro">knowledge base · <span id="lib-current">—</span></p>
 
     <table id="dtable">
       <thead><tr><th>File</th><th>Pages</th><th>Chunks</th><th>Embedding</th><th>Added</th></tr></thead>
@@ -320,6 +343,40 @@
     </div>
   </section>
 </main>
+
+<dialog id="rmodal" class="rmodal" aria-labelledby="rmodal-title">
+  <div class="rmodal-head">
+    <div>
+      <p class="micro" id="rmodal-crumb"></p>
+      <h3 id="rmodal-title"></h3>
+    </div>
+    <button class="btn ghost" id="rmodal-close" type="button">Close ✕</button>
+  </div>
+
+  <div class="rmodal-body">
+    <div class="rmodal-col">
+      <p class="micro">Matched chunk</p>
+      <pre class="detail" id="rmodal-text"></pre>
+      <p class="micro" style="margin-top:14px">Page context</p>
+      <pre class="detail" id="rmodal-context"></pre>
+    </div>
+    <div class="rmodal-col">
+      <p class="micro">Original document</p>
+      <div class="docframe">
+        <p class="hint" id="rmodal-hint">Load the source at the found position.</p>
+        <iframe id="rmodal-frame" title="source document" hidden></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="rmodal-foot">
+    <button class="btn primary" id="rmodal-show" type="button">Show in document</button>
+    <a class="btn" id="rmodal-open" href="#" target="_blank" rel="noopener">Open in new tab</a>
+    <button class="btn" id="rmodal-cite" type="button">Copy citation</button>
+    <button class="btn" id="rmodal-text-copy" type="button">Copy text</button>
+    <span class="micro" id="rmodal-note" style="margin-left:auto"></span>
+  </div>
+</dialog>
 
 <footer class="statusbar">
   <div class="inner">
