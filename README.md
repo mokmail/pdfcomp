@@ -59,11 +59,24 @@ install/`ollama pull` running — from any tab, with its live output in Settings
 
 ### Extraction
 
-* **PyMuPDF** (default) — fast, page-accurate text layer.
-* **Docling** — optional extra (`pip install docling`): layout/table aware, can
-  OCR scans. Slower and a large install. Installable from the page; the OCR
-  toggle applies to it. Availability is probed properly (a partially installed
-  namespace package is reported as *not installed*, not as working).
+* **Docling** — **the default** (`pip install docling`): layout/table aware, can
+  OCR scans. Slower and a large install, so it is an optional extra that is
+  installed from the page; the OCR toggle applies to it. Availability is probed
+  properly (a partially installed namespace package is reported as *not
+  installed*, not as working).
+* **PyMuPDF** — the fast, page-accurate fallback. While Docling is not installed
+  the app extracts with PyMuPDF and says so in the ingest log, so a missing
+  optional extra never blocks ingestion.
+
+### Deleting
+
+Deleting is total, on purpose. Removing a **document** drops its rows, chunks,
+FTS entries, **embeddings**, text export and stored source copy, and reports
+exactly what went. Removing a **knowledge base** deletes its whole data directory
+— the database, the vector store, the exports and the stored sources — after
+listing how many documents it holds. Guards refuse to touch the active knowledge
+base, a directory another knowledge base still uses, or a directory that does not
+look like a knowledge base.
 
 ### Embedding provider & model
 
@@ -141,12 +154,27 @@ python3 -m pdfkb.cli list | show <chunk_id> | export <doc_id> | delete <doc_id> 
 
 ## Design — the kmail.at look
 
-The web app is styled as part of kmail.at: the tokens are lifted verbatim from
-the live site's CSS custom properties (`:root` light, `.dark` dark) — near
-monochrome (no hue anywhere), hairline borders, Inter for display type and
-JetBrains Mono for micro-labels. The header carries the site's logo mark
-(grayscale, colour on hover), the `KMAIL.AT` wordmark and a breadcrumb; a
-**◐ DARK / ◐ LIGHT** button switches the pair live.
+The web app is styled as part of kmail.at: the surfaces, type scale and hairline
+geometry come from the live site's CSS custom properties (`:root` light, `.dark`
+dark) — near-grey panels, hairline borders, Inter for display type and JetBrains
+Mono for micro-labels. The header carries the site's logo mark, the `KMAIL.AT`
+wordmark and a breadcrumb; a **◐ DARK / ◐ LIGHT** button switches the pair live.
+
+On top of the neutral surfaces sits the **brand accent layer**, so the app is not
+black and white:
+
+| Accent | Colour (dark / light) | Where |
+|---|---|---|
+| green | `74 222 128` / `22 163 74` | primary buttons, the active tab, progress |
+| cyan | `34 211 238` / `14 116 144` | references, citations, the library column, focus rings |
+| lime | `163 230 53` / `77 124 15` | relevance scores |
+| amber | `251 191 36` / `180 83 9` | warnings, a running install/pull |
+| red | `248 113 113` / `220 38 38` | destructive actions and errors |
+
+The search field's AI halo, sweeping ring and ✦ mark are drawn in that palette,
+and the header and result modal carry a brand gradient rule. Light-mode accents
+are deliberately darker — the vivid dark-theme values fall to 3–4:1 contrast on
+white — and coloured buttons take the brand ink `#0a0e0c` rather than white.
 
 ## Tests
 
