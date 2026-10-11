@@ -1,8 +1,8 @@
-# Headless image for the pdfkb CLI (GUI needs a display; run app.py natively).
+# pdfkb web app. Serves the Starlette app (UI + JSON API) on 8765.
 FROM python:3.11-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+ && apt-get install -y --no-install-recommends openssh-client libglib2.0-0 \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -11,10 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Data (kb.sqlite + chroma) persists in /data; mount a volume and/or point to
-# an embedding server via PDFKB_OLLAMA_URL / PDFKB_EMBED_MODEL.
+# Knowledge base + vector store + settings live here; mount a volume.
 ENV PDFKB_DATA_DIR=/data
 VOLUME ["/data"]
+EXPOSE 8765
 
-ENTRYPOINT ["python", "-m", "pdfkb.cli"]
-CMD ["list"]
+CMD ["python", "-m", "uvicorn", "pdfkb.web:app", "--host", "0.0.0.0", "--port", "8765"]

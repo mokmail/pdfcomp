@@ -11,6 +11,7 @@ DATA_DIR = Path(os.environ.get("PDFKB_DATA_DIR", BASE_DIR / "kb_data"))
 SQLITE_PATH = DATA_DIR / "kb.sqlite"          # knowledge base: text + metadata
 CHROMA_DIR = DATA_DIR / "chroma"              # vector store: embeddings
 TEXT_DIR = DATA_DIR / "text"                  # human-readable text exports
+SOURCES_DIR = DATA_DIR / "sources"            # uploaded PDFs (web app keeps a copy)
 COLLECTION = "pdf_chunks"                     # Chroma collection name
 
 # Chunking (character-based, per page — keeps page attribution exact).
@@ -28,5 +29,5 @@ CHROMA_BATCH = 500
 
 
 def ensure_dirs():
-    for d in (DATA_DIR, CHROMA_DIR, TEXT_DIR):
+    for d in (DATA_DIR, CHROMA_DIR, TEXT_DIR, SOURCES_DIR):
         Path(d).mkdir(parents=True, exist_ok=True)

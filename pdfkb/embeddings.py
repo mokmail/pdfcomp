@@ -117,25 +117,61 @@ class HashEmbedder(Embedder):
         return [self._vec(t) for t in texts]
 
 
-def get_embedder(prefer=None):
-    """Return the best available embedder, falling back gracefully."""
-    prefer = prefer or ["ollama", "sentence-transformers", "hash"]
+class EmbedderError(RuntimeError):
+    """Raised when an explicitly requested provider cannot be used."""
+
+
+def list_ollama_models(url=None):
+    """Installed Ollama models, or raise if the server is unreachable."""
+    r = requests.get((url or config.OLLAMA_URL).rstrip("/") + "/api/tags", timeout=8)
+    r.raise_for_status()
+    return (r.json() or {}).get("models", [])
+
+
+def probe_embedder(provider=None, model=None, ollama_url=None):
+    """Build a provider and embed one string — the settings 'Test' path."""
+    import time
+    e = get_embedder(provider, model, ollama_url)
+    t = time.time()
+    vec = e.embed(["pdf knowledge base embedding probe"])
+    return {"provider": e.name, "model": e.model, "dim": len(vec[0]),
+            "ms": round((time.time() - t) * 1000, 1)}
+
+
+def get_embedder(provider=None, model=None, ollama_url=None):
+    """Return an embedder for the requested provider.
+
+    provider: auto | ollama | sentence-transformers | hash.
+    'auto' falls back gracefully; an explicit provider raises EmbedderError
+    instead of silently using something else.
+    """
+    p = (provider or "auto").strip().lower()
+    order = {
+        "auto": ["ollama", "sentence-transformers", "hash"],
+        "": ["ollama", "sentence-transformers", "hash"],
+        "ollama": ["ollama"],
+        "sentence-transformers": ["sentence-transformers"],
+        "st": ["sentence-transformers"],
+        "hash": ["hash"],
+    }.get(p, ["ollama", "sentence-transformers", "hash"])
     errors = []
-    for choice in prefer:
+    for choice in order:
         try:
             if choice == "ollama":
-                e = OllamaEmbedder()
+                e = OllamaEmbedder(model=model or None, url=ollama_url or None)
                 if e.available():
-                    e.embed(["probe"])           # confirms model + dimension
+                    e.embed(["probe"])              # confirms model + dimension
                     if e.dim:
                         return e
-                errors.append("ollama: server or model unavailable")
+                errors.append(f"ollama: server or model '{model or config.OLLAMA_EMBED_MODEL}' unavailable")
             elif choice == "sentence-transformers":
-                return SentenceTransformerEmbedder()
+                return SentenceTransformerEmbedder(model=model or None)
             elif choice == "hash":
                 return HashEmbedder()
-        except Exception as ex:  # noqa: BLE001 - keep trying other providers
+        except Exception as ex:  # noqa: BLE001
             errors.append(f"{choice}: {type(ex).__name__}: {ex}")
+    if p not in ("auto", ""):
+        raise EmbedderError("; ".join(errors) or f"provider '{p}' unavailable")
     e = HashEmbedder()
     e.errors = errors
     return e

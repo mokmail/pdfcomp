@@ -1,4 +1,14 @@
-"""PDF text extraction and chunking (PyMuPDF based)."""
+"""PDF text extraction: per-page text, keeping 1-based page numbers.
+
+Two interchangeable extractors (chosen in Settings):
+
+  pymupdf  — fast, text-layer only (default)
+  docling  — optional extra: layout/table-aware conversion, can OCR scans.
+             Slower and a large install (`pip install docling`).
+
+Both return ([doc_meta, ...], [{"page": n, "text": ...}]) so page attribution —
+which every source reference depends on — is preserved either way.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +20,15 @@ import pymupdf
 
 from . import config
 
+EXTRACTORS = [
+    {"id": "pymupdf", "label": "PyMuPDF", "install": "",
+     "note": "fast, page-accurate text layer"},
+    {"id": "docling", "label": "Docling", "install": "python3 -m pip install docling",
+     "note": "layout/table aware, optional OCR — slower, large install"},
+]
 
+
+# ---------------------------------------------------------------- helpers
 def _sha1_file(path, buf=1 << 20):
     h = hashlib.sha1()
     with open(path, "rb") as f:
@@ -24,47 +42,111 @@ def _sha1_file(path, buf=1 << 20):
 
 def _clean(text):
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[ \t]+\n", "\n", text)      # trailing spaces
-    text = re.sub(r"\n{3,}", "\n\n", text)       # collapse blank runs
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
-def extract_pages(path):
+def docling_available():
+    """True only if Docling is genuinely usable.
+
+    A bare `import docling` is not enough: a leftover/partial install can leave a
+    namespace package that imports fine but has no modules, so probe the
+    converter we actually use.
+    """
+    try:
+        from docling.document_converter import DocumentConverter  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def docling_version():
+    try:
+        from importlib.metadata import version
+        return version("docling")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# --------------------------------------------------------------- extractors
+def _extract_pymupdf(path):
+    doc = pymupdf.open(str(path))
+    try:
+        pages = []
+        for i in range(doc.page_count):
+            pages.append({"page": i + 1, "text": _clean(doc.load_page(i).get_text("text"))})
+        md = doc.metadata or {}
+        n = doc.page_count
+    finally:
+        doc.close()
+    return {"title": (md.get("title") or "").strip()}, pages, n
+
+
+def _extract_docling(path, ocr=False):
+    """Page-by-page text via Docling, from each item's provenance."""
+    from docling.document_converter import DocumentConverter
+    res = DocumentConverter().convert(str(path))
+    doc = res.document
+
+    by_page: dict[int, list[str]] = {}
+    for entry in doc.iterate_items():
+        item = entry[0] if isinstance(entry, tuple) else entry
+        text = (getattr(item, "text", "") or "").strip()
+        if not text:
+            continue
+        page_no = 1
+        for prov in (getattr(item, "prov", None) or []):
+            page_no = getattr(prov, "page_no", None) or page_no
+            break
+        by_page.setdefault(int(page_no), []).append(text)
+
+    if not by_page:                      # no provenance — fall back to markdown
+        md = doc.export_to_markdown()
+        return {}, [{"page": 1, "text": _clean(md)}], 1
+
+    pages = [{"page": p, "text": _clean("\n\n".join(by_page[p]))} for p in sorted(by_page)]
+    return {}, pages, len(pages)
+
+
+def extract_pages(path, extractor=None, ocr=False):
     """Return (doc_meta, pages) for a PDF.
 
-    pages is a list of {"page": 1-based int, "text": str}.
-    doc_meta carries the sha1-based doc_id used everywhere else.
+    pages is a list of {"page": 1-based int, "text": str}; doc_meta carries the
+    sha1-based doc_id used everywhere else.
     """
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(str(p))
 
-    doc = pymupdf.open(str(p))
-    try:
-        pages = []
-        for i in range(doc.page_count):
-            page = doc.load_page(i)
-            pages.append({"page": i + 1, "text": _clean(page.get_text("text"))})
-        md = doc.metadata or {}
-        sha1 = _sha1_file(p)
-        meta = {
-            "path": str(p.resolve()),
-            "filename": p.name,
-            "sha1": sha1,
-            "npages": doc.page_count,
-            "title": (md.get("title") or "").strip(),
-            "doc_id": sha1[:20],
-        }
-    finally:
-        doc.close()
+    ext = (extractor or "pymupdf").lower()
+    if ext == "docling":
+        if not docling_available():
+            raise RuntimeError("docling is not installed — python3 -m pip install docling")
+        meta_extra, pages, npages = _extract_docling(p, ocr=ocr)
+    else:
+        ext = "pymupdf"
+        meta_extra, pages, npages = _extract_pymupdf(p)
+
+    sha1 = _sha1_file(p)
+    meta = {
+        "path": str(p.resolve()),
+        "filename": p.name,
+        "sha1": sha1,
+        "npages": npages,
+        "title": meta_extra.get("title", ""),
+        "doc_id": sha1[:20],
+        "extractor": ext,
+    }
     return meta, pages
 
 
+# ------------------------------------------------------------------ chunking
 def chunk_pages(pages, size=None, overlap=None):
     """Split each page's text into overlapping chunks.
 
-    Chunking never crosses a page boundary, so every chunk maps to exactly
-    one page — which is what makes source references reliable.
+    Chunking never crosses a page boundary, so every chunk maps to exactly one
+    page — which is what makes source references reliable.
     """
     size = size or config.CHUNK_SIZE
     overlap = overlap or config.CHUNK_OVERLAP
@@ -82,11 +164,8 @@ def chunk_pages(pages, size=None, overlap=None):
         while start < n:
             end = min(start + size, n)
             chunks.append({
-                "page": pg["page"],
-                "chunk_index": idx,
-                "start": start,
-                "end": end,
-                "text": text[start:end],
+                "page": pg["page"], "chunk_index": idx,
+                "start": start, "end": end, "text": text[start:end],
             })
             idx += 1
             if end >= n:

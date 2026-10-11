@@ -4,6 +4,11 @@ chromadb>=1.0            # vector store
 requests>=2.31           # talks to the Ollama embedding server
 numpy>=1.26
 
+# Web app
+starlette                # ASGI web framework (used directly, no FastAPI)
+uvicorn>=0.30            # ASGI server
+python-multipart         # multipart uploads for /api/ingest
+
 # Optional: local embedding model if you do NOT run Ollama.
 # Heavy (pulls torch). Only needed as the middle fallback provider.
 # sentence-transformers>=3.0

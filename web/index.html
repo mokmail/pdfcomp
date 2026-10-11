@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Knowledge Base — kmail.at</title>
+<link rel="icon" href="/static/logo-mark.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="brandbar">
+    <a class="wordmark" href="https://kmail.at" target="_blank" rel="noopener" aria-label="kmail.at — home">
+      <img class="mark" src="/static/logo-mark.png" alt="" width="24" height="24">
+      <span class="brand-name">kmail.at</span>
+    </a>
+    <span class="crumb"><span class="sep">/</span> tools <span class="sep">/</span> pdf-knowledge-base</span>
+    <div class="header-right">
+      <select id="lib-select" title="active knowledge base library" aria-label="knowledge base library"></select>
+      <span class="micro" id="provider"></span>
+      <button class="btn ghost" id="job-badge" type="button" hidden></button>
+      <button class="btn ghost" id="theme" type="button">◐  DARK</button>
+    </div>
+  </div>
+  <nav class="tabs" aria-label="Tool sections">
+    <button class="tab is-active" data-panel="add" type="button">Add PDFs</button>
+    <button class="tab" data-panel="search" type="button">Search</button>
+    <button class="tab" data-panel="sources" type="button">Sources</button>
+    <button class="tab" data-panel="settings" type="button">Settings</button>
+    <button class="tab" data-panel="library" type="button">Library</button>
+  </nav>
+  <div id="jobbar" aria-hidden="true"><i></i></div>
+</header>
+
+<main class="container">
+  <div class="hero">
+    <p class="micro">extract · embed · retrieve</p>
+    <h1>PDF Knowledge Base</h1>
+    <p class="sub">Extract · embed · search — every hit traceable to its source page</p>
+  </div>
+
+  <!-- ------------------------------------------------------------ add -->
+  <section class="panel is-active" id="panel-add">
+    <p class="micro">Step 01 — Ingest</p>
+    <h2>Add PDFs to the knowledge base</h2>
+    <p class="lead">Each PDF is converted to text per page, split into overlapping chunks, and
+      stored twice: as text in a SQLite knowledge base and as embeddings in a vector store.
+      Source file + page are kept on every chunk so results stay traceable.</p>
+
+    <div class="actions">
+      <label class="btn primary">Add PDF files…
+        <input type="file" id="pick-files" accept="application/pdf,.pdf" multiple hidden>
+      </label>
+      <label class="btn">Add folder…
+        <input type="file" id="pick-folder" webkitdirectory directory multiple hidden>
+      </label>
+      <label class="check"><input type="checkbox" id="force"> Re-index if already added</label>
+    </div>
+
+    <div class="dropzone" id="drop">Drop PDFs here</div>
+    <div class="bar"><i id="bar"></i></div>
+
+    <p class="micro">Log</p>
+    <pre class="log" id="log"></pre>
+  </section>
+
+  <!-- --------------------------------------------------------- search -->
+  <section class="panel" id="panel-search">
+    <p class="micro">Step 02 — Retrieve</p>
+    <h2>Search the extracted content</h2>
+
+    <div class="searchrow">
+      <input id="q" type="search" placeholder="Ask the knowledge base…" autocomplete="off">
+      <button class="btn primary" id="go" type="button">Search</button>
+    </div>
+
+    <div class="opts">
+      <label class="check"><input type="radio" name="mode" value="hybrid" checked> Hybrid</label>
+      <label class="check"><input type="radio" name="mode" value="semantic"> Semantic</label>
+      <label class="check"><input type="radio" name="mode" value="keyword"> Keyword</label>
+      <span class="micro">Results</span>
+      <input id="k" type="number" min="1" max="50" value="10">
+    </div>
+
+    <table id="rtable">
+      <thead><tr><th>#</th><th>Score</th><th>Source</th><th>Page</th><th>Snippet</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <p class="micro" style="margin-top:26px">Selected result — full chunk + page context</p>
+    <div class="citation" id="citation"></div>
+    <pre class="detail" id="detail"></pre>
+    <div class="actions">
+      <a class="btn" id="open" href="#" target="_blank" rel="noopener">Open source PDF</a>
+      <button class="btn" id="copy-cite" type="button">Copy citation</button>
+      <button class="btn" id="copy-text" type="button">Copy text</button>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- sources -->
+  <section class="panel" id="panel-sources">
+    <p class="micro">Step 03 — Sources</p>
+    <h2>Connect a file server or other source</h2>
+    <p class="lead">Save a connection, scan it for PDFs, and ingest what you pick. Sources are
+      read-only: files are copied into the knowledge base, so the copies stay searchable even if
+      the origin goes away.</p>
+
+    <div class="grid2">
+      <div class="card">
+        <p class="micro">Connection</p>
+        <label class="field"><span>name</span>
+          <input id="src-name" type="text" spellcheck="false" placeholder="nuc-pdfs"></label>
+        <label class="field"><span>type</span>
+          <select id="src-type"></select></label>
+        <div id="src-fields"></div>
+        <div id="src-presets"></div>
+        <div class="actions">
+          <button class="btn" id="src-test" type="button">Test connection</button>
+          <button class="btn primary" id="src-save" type="button">Save connection</button>
+        </div>
+        <pre class="log" id="src-result" hidden></pre>
+      </div>
+
+      <div class="card">
+        <p class="micro">Saved sources — click to select</p>
+        <div id="src-list"></div>
+        <p class="micro" style="margin-top:16px">Stored in</p>
+        <div class="kv"><div class="kvrow"><span class="kvk">file</span>
+          <span class="kvv" id="src-file"></span></div></div>
+      </div>
+    </div>
+
+    <p class="micro" style="margin-top:28px">Files found</p>
+    <div class="actions">
+      <button class="btn" id="src-scan" type="button">Scan selected source</button>
+      <button class="btn primary" id="src-ingest" type="button" disabled>Ingest selected</button>
+      <button class="btn ghost" id="src-del" type="button">Delete source</button>
+      <label class="check"><input type="checkbox" id="src-force"> Re-index if already added</label>
+      <span class="micro" id="src-count"></span>
+    </div>
+    <table id="stable">
+      <thead><tr><th class="pick"></th><th>File</th><th>Size</th><th>Location</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <pre class="log" id="src-log" hidden></pre>
+
+    <p class="micro" style="margin-top:28px">Save a document to this source</p>
+    <div class="actions">
+      <select id="sp-doc" style="min-width:300px;padding:10px 12px;background:rgb(var(--bg-void));
+              color:rgb(var(--text-ghost));border:1px solid rgb(var(--line-hi));border-radius:2px;
+              font-family:var(--font-mono);font-size:12.5px"></select>
+      <label class="check"><input type="radio" name="sp-what" value="pdf" checked> PDF</label>
+      <label class="check"><input type="radio" name="sp-what" value="text"> readable text</label>
+      <button class="btn primary" id="sp-save" type="button">Save to source</button>
+    </div>
+
+    <p class="micro" style="margin-top:28px">Where to connect what — click a row to pick the type</p>
+    <table id="ptable">
+      <thead><tr><th>Service</th><th>Connector</th><th>How</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- ------------------------------------------------------- settings -->
+  <section class="panel" id="panel-settings">
+    <p class="micro">Step 04 — Configure</p>
+    <h2>Extraction &amp; embedding</h2>
+    <p class="lead">How each PDF becomes text, and which model turns that text into the vectors
+      semantic search compares. Changing the embedding model changes the vector dimension, so
+      existing vectors must be rebuilt — reset the knowledge base and re-ingest afterwards.</p>
+
+    <div class="notice" id="set-warning" hidden></div>
+
+    <div class="grid2">
+      <div class="card">
+        <p class="micro">Extraction</p>
+        <label class="field"><span>extractor</span>
+          <select id="x-extractor"></select></label>
+        <label class="check"><input type="checkbox" id="x-ocr"> OCR scanned pages (docling only)</label>
+        <div class="actions">
+          <button class="btn" id="x-save" type="button">Save extraction</button>
+        </div>
+        <div class="notice" id="x-note" hidden></div>
+        <pre class="log" id="x-result" hidden></pre>
+      </div>
+
+      <div class="card">
+        <p class="micro">Optional extras</p>
+        <div class="kv" id="x-extras"></div>
+        <label class="field"><span>install extra with pip</span>
+          <input id="i-extra" type="text" spellcheck="false" placeholder="docling"></label>
+        <div class="actions">
+          <button class="btn" id="i-install" type="button">Install extra</button>
+        </div>
+        <p class="micro" style="margin-top:20px">Install an ollama model</p>
+        <label class="field"><span>model to install</span>
+          <input id="p-model" type="text" spellcheck="false" placeholder="nomic-embed-text"></label>
+        <div class="actions">
+          <button class="btn" id="p-install" type="button">Install model</button>
+        </div>
+        <pre class="log" id="job-log" hidden></pre>
+      </div>
+    </div>
+
+    <h2 style="margin-top:34px">Embedding provider &amp; model</h2>
+
+    <div class="grid2" style="margin-top:16px">
+      <div class="card">
+        <p class="micro">Provider</p>
+        <label class="field"><span>provider</span>
+          <select id="s-provider"></select></label>
+        <label class="field"><span>ollama url</span>
+          <input id="s-url" type="text" spellcheck="false"></label>
+        <label class="field"><span>model — blank uses the provider default</span>
+          <input id="s-model" type="text" list="model-list" spellcheck="false"
+                 placeholder="qwen3-embedding:0.6b"></label>
+        <datalist id="model-list"></datalist>
+        <div class="actions">
+          <button class="btn" id="s-test" type="button">Test connection</button>
+          <button class="btn primary" id="s-save" type="button">Save</button>
+        </div>
+        <pre class="log" id="s-result" hidden></pre>
+      </div>
+
+      <div class="card">
+        <p class="micro">Current</p>
+        <div class="kv" id="s-current"></div>
+        <p class="micro" style="margin-top:20px">Installed ollama models — click to use</p>
+        <div class="modellist" id="s-models"></div>
+        <div class="actions">
+          <button class="btn ghost" id="s-refresh" type="button">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:34px">Libraries — target knowledge bases</h2>
+    <p class="lead">Each library is a named storage profile: its own knowledge-base file, vector
+      store and exports. Switch the active library to search a different collection; the current
+      knowledge base is backed up on every switch.</p>
+
+    <table id="libtable">
+      <thead><tr><th>Name</th><th>Backend</th><th>Documents</th><th>Location</th><th class="pick"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="actions">
+      <input id="lib-name" type="text" spellcheck="false" placeholder="library name"
+             style="padding:10px 12px;background:rgb(var(--bg-void));color:rgb(var(--text-ghost));
+                    border:1px solid rgb(var(--line-hi));border-radius:2px;
+                    font-family:var(--font-mono);font-size:12.5px">
+      <button class="btn" id="lib-add" type="button">Save these settings as a library</button>
+      <button class="btn" id="lib-update" type="button">Update the active library</button>
+    </div>
+    <pre class="log" id="lib-result" hidden></pre>
+
+    <h2 style="margin-top:34px">Storage</h2>
+    <p class="lead">Where the knowledge base, the vector store and the exported text live.
+      Applying new storage points the app at that location (opening an existing knowledge base
+      there, or creating a new one); the current knowledge-base file is backed up first.</p>
+
+    <div class="card" style="margin-top:16px">
+      <div class="grid2">
+        <div>
+          <label class="field"><span>data directory (root)</span>
+            <input id="st-data" type="text" spellcheck="false"></label>
+          <label class="field"><span>knowledge base file (sqlite)</span>
+            <input id="st-sqlite" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/kb.sqlite"></label>
+          <label class="field"><span>vector backend</span>
+            <select id="st-backend"></select></label>
+          <div class="notice" id="st-note" hidden></div>
+          <label class="field"><span>vector store path (local backends)</span>
+            <input id="st-vpath" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/chroma"></label>
+          <label class="field"><span>vector url (server backends — qdrant/opensearch)</span>
+            <input id="st-vurl" type="text" spellcheck="false"
+                   placeholder="http://localhost:6333  ·  or :memory: for a local qdrant"></label>
+          <label class="field"><span>vector api key (server backends)</span>
+            <input id="st-vkey" type="password" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span>vector index / collection (server backends)</span>
+            <input id="st-vindex" type="text" spellcheck="false" placeholder="blank = the collection name below"></label>
+          <label class="field"><span>vector collection name</span>
+            <input id="st-vcoll" type="text" spellcheck="false"></label>
+          <label class="field"><span>text exports directory</span>
+            <input id="st-text" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/text"></label>
+          <label class="field"><span>source copies directory</span>
+            <input id="st-sources" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/sources"></label>
+          <div class="actions">
+            <button class="btn primary" id="st-save" type="button">Apply storage</button>
+            <button class="btn" id="vt-test" type="button">Test vector store</button>
+            <button class="btn ghost" id="st-defaults" type="button">Use defaults</button>
+          </div>
+          <pre class="log" id="vt-result" hidden></pre>
+        </div>
+        <div>
+          <p class="micro">Resolved</p>
+          <div class="kv" id="st-current"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- library -->
+  <section class="panel" id="panel-library">
+    <p class="micro">Step 05 — Manage</p>
+    <h2>Indexed documents</h2>
+
+    <table id="dtable">
+      <thead><tr><th>File</th><th>Pages</th><th>Chunks</th><th>Embedding</th><th>Added</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="actions" style="margin-top:22px">
+      <button class="btn" id="refresh" type="button">Refresh</button>
+      <button class="btn" id="open-any" type="button">Open PDF</button>
+      <button class="btn" id="export" type="button">Export text</button>
+      <button class="btn" id="del" type="button">Delete</button>
+      <button class="btn ghost" id="reset" type="button" style="margin-left:auto">Reset knowledge base…</button>
+    </div>
+  </section>
+</main>
+
+<footer class="statusbar">
+  <div class="inner">
+    <span id="status">Initialising…</span>
+    <span class="foot-brand">kmail.at</span>
+  </div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
