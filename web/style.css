@@ -52,6 +52,33 @@ h2{ margin:.25rem 0 .5rem; font-size:20px; font-weight:600;
     letter-spacing:-.01em; color:rgb(var(--text-ghost)) }
 .lead,.sub{ max-width:66ch; margin:.5rem 0 0; font-size:15px }
 
+/* ---------------------------------------------------------------- icons
+   One thin stroke weight everywhere. Sizes are in em, so an icon follows the text it sits
+   next to; the colour is always currentColor, so an icon is never a colour of its own. */
+.ic{
+  width:1em; height:1em; flex:0 0 auto; overflow:visible;
+  fill:none; stroke:currentColor; stroke-width:1.25;
+  stroke-linecap:round; stroke-linejoin:round;
+  vertical-align:-0.14em;
+}
+.btn .ic{ margin-right:7px; opacity:.78 }
+.btn:hover .ic{ opacity:1 }
+.btn.ghost .ic{ margin-right:6px }          /* the tighter ghost buttons */
+a.btn .ic{ opacity:.78 }
+.mark{ display:inline-flex; vertical-align:-0.18em; margin-right:3px }
+.mark .ic{ width:1.05em; height:1.05em; stroke-width:1.4 }
+.mark.ok{ color:rgb(var(--acc-1)) }
+.mark.skip{ color:rgb(var(--text-faint)) }
+.mark.warn{ color:rgb(var(--acc-warn)) }
+.mark.bad{ color:rgb(var(--acc-bad)) }
+.chev{ display:inline-flex; color:rgb(var(--text-faint)); transition:transform .15s }
+.chev .ic{ width:11px; height:11px }
+summary[open] > .chev, summary[open] > .setup-caret{ transform:rotate(180deg) }
+.searchfield-icon{ display:inline-flex }
+.searchfield-icon .ic{ width:17px; height:17px; stroke-width:1.4 }
+.setup-caret{ display:inline-flex }
+.setup-caret .ic{ width:12px; height:12px }
+
 /* ------------------------------------------------------- brand header */
 .site-header{
   position:sticky; top:0; z-index:40; background:rgb(var(--bg-void));

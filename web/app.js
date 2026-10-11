@@ -10,6 +10,60 @@ const api = {
 };
 const setText = (sel, txt) => { const el = $(sel); el.hidden = false; el.textContent = txt; };
 
+/* ------------------------------------------------------------- icons
+   Thin-line icons, one stroke weight, drawn in currentColor so they take the colour of
+   whatever they sit in. 24x24 grid, no fill — the whole set is one <svg> template and a
+   table of paths, which keeps every icon consistent and lets CSS set the weight. */
+const ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
+  moon: '<path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 20 20"/>',
+  sparkle: '<path d="M12 3.5l1.7 4.8 4.8 1.7-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7z"/><path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  chevron: '<path d="M6 9.5l6 5.5 6-5.5"/>',
+  folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.2l1.6 2h6.2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/>',
+  files: '<path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-8z"/><path d="M13.5 3.5v4h5"/><path d="M12 11.5v5M9.5 14h5"/>',
+  download: '<path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M4.5 19.5h15"/>',
+  upload: '<path d="M12 16.5v-10"/><path d="M8 10.5l4-4 4 4"/><path d="M4.5 19.5h15"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  plus: '<path d="M12 5.5v13M5.5 12h13"/>',
+  minus: '<path d="M6 12h12"/>',
+  alert: '<path d="M12 4.5 3.5 19h17z"/><path d="M12 9.5v4.5M12 17h.01"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5V8h-3.5"/>',
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12h9l1-12"/><path d="M10.5 11v5M13.5 11v5"/>',
+  plug: '<path d="M9 3.5v5M15 3.5v5"/><path d="M6.5 8.5h11v3a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v3.5"/>',
+  save: '<path d="M5.5 4.5h9l4 4v11h-13z"/><path d="M9 4.5v5h5"/><path d="M8.5 19.5v-5h7v5"/>',
+  external: '<path d="M13 5.5h5.5V11"/><path d="M18.5 5.5 11 13"/><path d="M17 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H10"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 5.5h-9a1 1 0 0 0-1 1v9"/>',
+  layers: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12.5l8 4 8-4"/><path d="M4 16.5l8 4 8-4"/>',
+  spinner: '<path d="M12 4a8 8 0 1 0 8 8" stroke-dasharray="38 12"/>',
+};
+
+const icon = (name, cls = "") =>
+  `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">`
+  + `${ICONS[name] || ""}</svg>`;
+
+/* Every element that carries data-ic gets its glyph once — declarative markup, no
+   duplicated path data in the HTML, and re-rendered fragments stay correct. */
+function paintIcons(root = document) {
+  $$("[data-ic]", root).forEach((el) => {
+    if (el.dataset.icDone === el.dataset.ic) return;
+    el.insertAdjacentHTML("afterbegin", icon(el.dataset.ic));
+    el.dataset.icDone = el.dataset.ic;
+  });
+}
+
+/* Fragments are built as HTML strings all over this file, so instead of remembering to call
+   paintIcons() after each render, watch the DOM and fill in whatever appears — one place,
+   and it cannot be forgotten. It settles after two passes, because the second finds nothing
+   left to insert. */
+let iconQueued = false;
+new MutationObserver(() => {
+  if (iconQueued) return;
+  iconQueued = true;
+  requestAnimationFrame(() => { iconQueued = false; paintIcons(); });
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 const state = {
   results: [], cur: null, docs: [], selDoc: -1, busy: false, ingesting: false,
   lastQuery: "",
@@ -21,8 +75,15 @@ const state = {
 /* ------------------------------------------------------------ theme */
 let theme = localStorage.getItem("pdfkb-theme") || "light";
 const applyTheme = () => {
-  document.documentElement.classList.toggle("dark", theme === "dark");
-  $("#theme").textContent = theme === "dark" ? "◐  LIGHT" : "◐  DARK";
+  const dark = theme === "dark";
+  document.documentElement.classList.toggle("dark", dark);
+  // Set the icon name and let paintIcons draw it — inserting it here as well put two
+  // glyphs on the button, because the DOM watcher then filled it in a second time.
+  const el = $("#theme");
+  el.dataset.ic = dark ? "moon" : "sun";
+  el.dataset.icDone = "";
+  el.innerHTML = `<span>${dark ? "LIGHT" : "DARK"}</span>`;
+  paintIcons(el);
 };
 applyTheme();
 $("#theme").onclick = () => {
@@ -43,7 +104,7 @@ $$(".tab").forEach((t) => (t.onclick = () => {
 /* ------------------------------------------------------------ chrome */
 function log(msg) {
   const el = $("#log");
-  el.textContent += msg + "\n";
+  el.insertAdjacentHTML("beforeend", msg + "\n");     // already escaped by the caller
   el.scrollTop = el.scrollHeight;
 }
 const bar = (pct) => { $("#bar").style.width = Math.max(0, Math.min(100, pct)) + "%"; };
@@ -69,7 +130,7 @@ async function refresh() {
         ? "Nothing indexed in this library yet — open Sources → Local files to ingest your first document."
         : "";
     }
-  } catch (e) { log("stats unavailable: " + e); }
+  } catch (e) { log(logText("stats unavailable: " + e)); }
 }
 
 /* The setup in force, kept in the header: what embeds, where it saves, what reads it. */
@@ -104,7 +165,7 @@ function renderSetup() {
     sum.textContent = `setup · ${s.library || "default"} · ${ext}${ver ? " " + ver : ""}`
       + ` · ${s.vector_backend || "—"}·${s.vector_collection || "—"}`
       + ` · ${s.vectors ?? 0} vectors`
-      + (s.collection_match === false ? "  ⚠ collection mismatch" : "");
+      + (s.collection_match === false ? ` <span class="mark bad">${icon("alert")}</span> collection mismatch` : "");
   }
 }
 
@@ -117,15 +178,31 @@ if (setupBar) {
 }
 
 /* ------------------------------------------------------------ ingest */
+/* Every log line is HTML now (the marks are thin-line icons), so text goes through esc(). */
+const logText = (s) => esc(s);
+
 /* One line per file, plainly: indexed + embedded, already in the knowledge base,
    nothing to extract, or failed. */
+const MARK = { added: ["check", "ok"], skipped: ["minus", "skip"],
+               empty: ["alert", "warn"], error: ["x", "bad"] };
+const mark = (kind) => {
+  const [name, cls] = MARK[kind] || MARK.empty;
+  return `<span class="mark ${cls}">${icon(name)}</span>`;
+};
+
 function ingestLine(x) {
-  if (x.status === "error") return `  ✕ failed — ${x.filename}  ${x.message || ""}`;
-  if (x.status === "skipped") return `  • already in the knowledge base — skipped   ${x.filename}`;
-  if (x.status === "empty") return `  ! no text to index   ${x.filename}  ${x.message || ""}`;
-  return `  ✓ indexed + embedded   ${x.filename}  —  ${x.npages || 0} pages, `
-    + `${x.nchunks || 0} chunks${x.extractor ? ", " + x.extractor : ""}`
-    + (x.extractor_note ? `\n      note: ${x.extractor_note}` : "");
+  if (x.status === "error") {
+    return `${mark("error")} ${esc(x.filename)} — ${esc(x.message || "failed")}`;
+  }
+  if (x.status === "skipped") {
+    return `${mark("skipped")} already in the knowledge base — skipped   ${esc(x.filename)}`;
+  }
+  if (x.status === "empty") {
+    return `${mark("empty")} no text to index   ${esc(x.filename)}  ${esc(x.message || "")}`;
+  }
+  return `${mark("added")} indexed + embedded   ${esc(x.filename)}  —  ${x.npages || 0} pages, `
+    + `${x.nchunks || 0} chunks${x.extractor ? ", " + esc(x.extractor) : ""}`
+    + (x.extractor_note ? `\n      note: ${esc(x.extractor_note)}` : "");
 }
 
 function ingestSummary(results) {
@@ -140,11 +217,11 @@ function ingestSummary(results) {
 
 async function ingest(files) {
   files = [...files].filter((f) => f.name.toLowerCase().endsWith(".pdf"));
-  if (!files.length) { log("No PDF files in that selection."); return; }
+  if (!files.length) { log(logText("No PDF files in that selection.")); return; }
   const fd = new FormData();
   files.forEach((f) => fd.append("files", f));
   fd.append("force", $("#force").checked ? "true" : "false");
-  $("#log").textContent = "";
+  $("#log").innerHTML = "";
   log(`Ingesting ${files.length} file(s) …`);
   setBusy(true); bar(15);
   state.ingesting = true; watchJob();     // the header reports it from here on, on any page
@@ -152,9 +229,9 @@ async function ingest(files) {
     const r = await api.post("/api/ingest", fd);
     bar(100);
     (r.results || []).forEach((x) => log(ingestLine(x)));
-    log("\n" + (ingestSummary(r.results) || "nothing to do"));
+    log("<br>" + esc(ingestSummary(r.results) || "nothing to do"));
     await refresh(); loadDocs();
-  } catch (e) { log("  ingest failed: " + e); bar(0); }
+  } catch (e) { log(logText("  ingest failed: " + e)); bar(0); }
   finally { setBusy(false); }
 }
 $("#pick-files").onchange = (e) => ingest(e.target.files);
@@ -207,7 +284,7 @@ async function doSearch() {
       tr.onclick = () => { select(i); openResult(i); };
       tb.appendChild(tr);
     });
-  } catch (e) { log("search failed: " + e); }
+  } catch (e) { log(logText("search failed: " + e)); }
   finally { setBusy(false); field.classList.remove("is-searching"); tabCounts(); }
 }
 $("#go").onclick = doSearch;
@@ -337,7 +414,7 @@ async function loadDocs() {
     });
     tabCounts();
     refresh();
-  } catch (e) { log("documents unavailable: " + e); }
+  } catch (e) { log(logText("documents unavailable: " + e)); }
 }
 const curDoc = () => state.docs[state.selDoc];
 
@@ -390,7 +467,8 @@ $("#reset").onclick = async () => {
   if (!confirm("Delete ALL documents, chunks and vectors?\n\nThe knowledge-base file is backed up first.")) return;
   const r = await api.post("/api/reset", new URLSearchParams({ confirm: "RESET" }));
   $("#rtable tbody").innerHTML = "";
-  log(r && r.backup ? `Knowledge base reset (backup kept at ${r.backup}).` : "Knowledge base reset.");
+  log(logText(r && r.backup ? `Knowledge base reset (backup kept at ${r.backup}).`
+                            : "Knowledge base reset."));
   await refresh(); loadDocs();
 };
 
@@ -412,7 +490,7 @@ function renderSrcFields(type) {
         <input id="sf-${esc(f.key)}" data-key="${esc(f.key)}"
                type="${f.secret ? "password" : "text"}" spellcheck="false" autocomplete="off"
                placeholder="${esc(f.placeholder || "")}">
-        ${f.browse ? `<button class="btn browse" type="button"
+        ${f.browse ? `<button class="btn browse" data-ic="folder" type="button"
              data-target="sf-${esc(f.key)}" data-kind="${esc(f.browse)}">Browse…</button>` : ""}
       </span></label>`).join("")
     + (c.available ? "" : `<div class="notice">Needs a package: <code>${esc(c.install || "")}</code></div>`);
@@ -466,7 +544,7 @@ function renderSources() {
   el.innerHTML = state.sources.map((s) => {
     const bits = [s.type, s.host, s.share, s.path, s.url].filter(Boolean);
     return `<button type="button" class="model ${state.srcSel === s.name ? "is-embed" : ""}" data-name="${esc(s.name)}">
-      <span class="mname">${esc(s.name)}${state.srcSel === s.name ? "  ✓" : ""}</span>
+      <span class="mname">${esc(s.name)}${state.srcSel === s.name ? ` <span class="mark ok">${icon("check")}</span>` : ""}</span>
       <span class="msize">${esc(bits.join(" · "))}</span></button>`;
   }).join("");
   $$("#src-list .model").forEach((b) => (b.onclick = () => {
@@ -667,7 +745,7 @@ function renderLibraries(active) {
   if (!state.libs.length) state.libs = [active || names[0]];
   $("#scope-list").innerHTML = state.libraries.map((l) => `
     <label><input type="checkbox" value="${esc(l.name)}">
-      <span>${esc(l.name)}${l.active ? "  ✓" : ""}</span>
+      <span>${esc(l.name)}${l.active ? ` <span class="mark ok">${icon("check")}</span>` : ""}</span>
       <span class="micro">${l.documents != null ? l.documents : "—"}</span></label>`).join("");
   $$("#scope-list input[type=checkbox]").forEach((c) => (c.onchange = onScopeChange));
   updateScope();
@@ -675,14 +753,14 @@ function renderLibraries(active) {
   const tb = $("#libtable tbody");
   tb.innerHTML = state.libraries.map((l) => `
     <tr data-name="${esc(l.name)}">
-      <td class="src">${esc(l.name)}${l.active ? "  ✓" : ""}</td>
+      <td class="src">${esc(l.name)}${l.active ? ` <span class="mark ok">${icon("check")}</span>` : ""}</td>
       <td class="mono">${esc(l.collection || l.backend || "")}</td>
       <td class="mono">${l.documents != null ? l.documents : "—"}</td>
       <td class="mono">${esc(l.container || l.data_dir || "")}</td>
       <td class="pick">${l.active
         ? `<button class="btn ghost" type="button" disabled>active</button>`
-        : `<button class="btn ghost lib-use" type="button">use</button>
-           <button class="btn ghost lib-del" type="button">del</button>`}</td>
+        : `<button class="btn ghost lib-use" data-ic="check" type="button">use</button>
+           <button class="btn ghost lib-del" data-ic="trash" type="button">del</button>`}</td>
     </tr>`).join("") || `<tr><td colspan="5" class="hint">No libraries.</td></tr>`;
   $$("#libtable .lib-use").forEach((b) => (b.onclick = () => useLibrary(b.closest("tr").dataset.name)));
   $$("#libtable .lib-del").forEach((b) => (b.onclick = () => deleteLibrary(b.closest("tr").dataset.name)));
@@ -1031,6 +1109,7 @@ $("#st-defaults").onclick = () => {
 };
 
 /* --------------------------------------------------------------- init */
+paintIcons();        // the static markup's icons, before anything is rendered into it
 refresh();
 loadDocs();
 loadSettings();

@@ -241,7 +241,11 @@ black and white:
 | amber | `251 191 36` / `180 83 9` | warnings, a running install/pull |
 | red | `248 113 113` / `220 38 38` | destructive actions and errors |
 
-The search field's AI halo, sweeping ring and ✦ mark are drawn in that palette,
+Icons are one thin-line set: a single 1.25px stroke weight, `currentColor` so an icon is
+never a colour of its own, sized in `em` so it follows the text beside it, and injected from
+a `data-ic` attribute — the button markup stays declarative and every glyph stays consistent.
+
+The search field's AI halo, sweeping ring and sparkle mark are drawn in that palette,
 and the header and result modal carry a brand gradient rule. Light-mode accents
 are deliberately darker — the vivid dark-theme values fall to 3–4:1 contrast on
 white — and coloured buttons take the brand ink `#0a0e0c` rather than white. A

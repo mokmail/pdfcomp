@@ -22,7 +22,7 @@
     <div class="header-right">
       <select id="lib-select" title="active knowledge base library" aria-label="knowledge base library"></select>
       <button class="btn ghost" id="job-badge" type="button" hidden></button>
-      <button class="btn ghost" id="theme" type="button">◐  DARK</button>
+      <button class="btn ghost" id="theme" type="button">DARK</button>
     </div>
   </div>
 
@@ -37,7 +37,7 @@
   <details class="setupbar" id="setupbar">
     <summary title="what is embedding, where it saves, what is reading — click to unfold">
       <span class="setup-sum" id="setup-sum"></span>
-      <span class="setup-caret" aria-hidden="true">▾</span>
+      <span class="setup-caret" aria-hidden="true" data-ic="chevron"></span>
     </summary>
     <div class="inner" id="setup"></div>
   </details>
@@ -57,11 +57,11 @@
       <div class="searchfield" id="searchfield">
         <span class="searchfield-glow" aria-hidden="true"></span>
         <span class="searchfield-ring" aria-hidden="true"></span>
-        <span class="searchfield-icon" aria-hidden="true">✦</span>
+        <span class="searchfield-icon" aria-hidden="true"></span>
         <input id="q" type="search" autocomplete="off" spellcheck="false"
                placeholder="Ask anything across your documents…"
                aria-label="search the knowledge base">
-        <button class="btn primary search-go" id="go" type="button">Search</button>
+        <button class="btn primary search-go" id="go" data-ic="search" type="button">Search</button>
       </div>
 
       <div class="opts center">
@@ -69,7 +69,7 @@
         <label class="check"><input type="radio" name="mode" value="semantic"> Semantic</label>
         <label class="check"><input type="radio" name="mode" value="keyword"> Keyword</label>
         <details class="scope" id="scope">
-          <summary>search within · <b id="scope-count">1</b> ▾</summary>
+          <summary>search within · <b id="scope-count">1</b> <span class="chev" data-ic="chevron"></span></summary>
           <div class="scope-menu">
             <p class="micro">knowledge bases</p>
             <div id="scope-list"></div>
@@ -104,10 +104,10 @@
       chunk, so results remain traceable to where they came from.</p>
 
     <div class="actions">
-      <label class="btn primary">Add PDF files…
+      <label class="btn primary" data-ic="files">Add PDF files…
         <input type="file" id="pick-files" accept="application/pdf,.pdf" multiple hidden>
       </label>
-      <label class="btn">Add folder…
+      <label class="btn" data-ic="folder">Add folder…
         <input type="file" id="pick-folder" webkitdirectory directory multiple hidden>
       </label>
       <label class="check"><input type="checkbox" id="force"> Re-index if already added</label>
@@ -135,8 +135,8 @@
         <div id="src-fields"></div>
         <div id="src-presets"></div>
         <div class="actions">
-          <button class="btn" id="src-test" type="button">Test connection</button>
-          <button class="btn primary" id="src-save" type="button">Save connection</button>
+          <button class="btn" id="src-test" data-ic="plug" type="button">Test connection</button>
+          <button class="btn primary" id="src-save" data-ic="save" type="button">Save connection</button>
         </div>
         <pre class="log" id="src-result" hidden></pre>
       </div>
@@ -152,9 +152,9 @@
 
     <p class="micro" style="margin-top:28px">Files found</p>
     <div class="actions">
-      <button class="btn" id="src-scan" type="button">Scan selected source</button>
-      <button class="btn primary" id="src-ingest" type="button" disabled>Ingest selected</button>
-      <button class="btn ghost" id="src-del" type="button">Delete source</button>
+      <button class="btn" id="src-scan" data-ic="refresh" type="button">Scan selected source</button>
+      <button class="btn primary" id="src-ingest" data-ic="download" type="button" disabled>Ingest selected</button>
+      <button class="btn ghost" id="src-del" data-ic="trash" type="button">Delete source</button>
       <label class="check"><input type="checkbox" id="src-force"> Re-index if already added</label>
       <span class="micro" id="src-count"></span>
     </div>
@@ -171,7 +171,7 @@
               font-family:var(--font-mono);font-size:12.5px"></select>
       <label class="check"><input type="radio" name="sp-what" value="pdf" checked> PDF</label>
       <label class="check"><input type="radio" name="sp-what" value="text"> readable text</label>
-      <button class="btn primary" id="sp-save" type="button">Save to source</button>
+      <button class="btn primary" id="sp-save" data-ic="upload" type="button">Save to source</button>
     </div>
 
     <p class="micro" style="margin-top:28px">Where to connect what — click a row to pick the type</p>
@@ -200,7 +200,7 @@
         <label class="field"><span>docling service URL</span>
           <input id="x-docling-url" placeholder="http://docling:5001 — blank = docling inside this app"></label>
         <div class="actions">
-          <button class="btn" id="x-save" type="button">Save extraction</button>
+          <button class="btn" id="x-save" data-ic="save" type="button">Save extraction</button>
         </div>
         <div class="notice" id="x-note" hidden></div>
         <pre class="log" id="x-result" hidden></pre>
@@ -212,13 +212,13 @@
         <label class="field"><span>install extra with pip</span>
           <input id="i-extra" type="text" spellcheck="false" placeholder="docling"></label>
         <div class="actions">
-          <button class="btn" id="i-install" type="button">Install extra</button>
+          <button class="btn" id="i-install" data-ic="download" type="button">Install extra</button>
         </div>
         <p class="micro" style="margin-top:20px">Install an ollama model</p>
         <label class="field"><span>model to install</span>
           <input id="p-model" type="text" spellcheck="false" placeholder="nomic-embed-text"></label>
         <div class="actions">
-          <button class="btn" id="p-install" type="button">Install model</button>
+          <button class="btn" id="p-install" data-ic="download" type="button">Install model</button>
         </div>
         <pre class="log" id="job-log" hidden></pre>
       </div>
@@ -238,8 +238,8 @@
                  placeholder="qwen3-embedding:0.6b"></label>
         <datalist id="model-list"></datalist>
         <div class="actions">
-          <button class="btn" id="s-test" type="button">Test connection</button>
-          <button class="btn primary" id="s-save" type="button">Save</button>
+          <button class="btn" id="s-test" data-ic="plug" type="button">Test connection</button>
+          <button class="btn primary" id="s-save" data-ic="save" type="button">Save</button>
         </div>
         <pre class="log" id="s-result" hidden></pre>
       </div>
@@ -250,7 +250,7 @@
         <p class="micro" style="margin-top:20px">Installed ollama models — click to use</p>
         <div class="modellist" id="s-models"></div>
         <div class="actions">
-          <button class="btn ghost" id="s-refresh" type="button">Refresh</button>
+          <button class="btn ghost" id="s-refresh" data-ic="refresh" type="button">Refresh</button>
         </div>
       </div>
     </div>
@@ -266,7 +266,7 @@
           <label class="field"><span>data directory (root)</span>
             <span class="inputrow">
               <input id="st-data" type="text" spellcheck="false">
-              <button class="btn browse" type="button" data-target="st-data" data-kind="dir">Browse…</button>
+              <button class="btn browse" type="button" data-ic="folder" data-target="st-data" data-kind="dir">Browse…</button>
             </span></label>
           <label class="field"><span>knowledge base file (sqlite)</span>
             <input id="st-sqlite" type="text" spellcheck="false" placeholder="blank = &lt;data dir&gt;/kb.sqlite"></label>
@@ -353,7 +353,7 @@
       <p class="micro" id="rmodal-crumb"></p>
       <h3 id="rmodal-title"></h3>
     </div>
-    <button class="btn ghost" id="rmodal-close" type="button">Close ✕</button>
+    <button class="btn ghost" id="rmodal-close" data-ic="x" type="button">Close</button>
   </div>
 
   <div class="rmodal-body">
@@ -373,10 +373,10 @@
   </div>
 
   <div class="rmodal-foot">
-    <button class="btn primary" id="rmodal-show" type="button">Show in document</button>
-    <a class="btn" id="rmodal-open" href="#" target="_blank" rel="noopener">Open in new tab</a>
-    <button class="btn" id="rmodal-cite" type="button">Copy citation</button>
-    <button class="btn" id="rmodal-text-copy" type="button">Copy text</button>
+    <button class="btn primary" id="rmodal-show" data-ic="search" type="button">Show in document</button>
+    <a class="btn" id="rmodal-open" data-ic="external" href="#" target="_blank" rel="noopener">Open in new tab</a>
+    <button class="btn" id="rmodal-cite" data-ic="copy" type="button">Copy citation</button>
+    <button class="btn" id="rmodal-text-copy" data-ic="copy" type="button">Copy text</button>
     <span class="micro" id="rmodal-note" style="margin-left:auto"></span>
   </div>
 </dialog>
