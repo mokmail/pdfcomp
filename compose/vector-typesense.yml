@@ -1,0 +1,16 @@
+# vector search · API key from TYPESENSE_API_KEY
+#
+#   docker compose -f docker-compose.yml -f compose/vector-typesense.yml \
+#     --profile typesense up -d
+#
+# or simply:  ./bin/kb up typesense
+#
+# It does two things: starts the `typesense` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: typesense
+      PDFKB_VECTOR_URL: http://typesense:8108
+      PDFKB_VECTOR_COLLECTION: pdf_chunks

@@ -1,0 +1,13 @@
+# Extraction as its own service: Docling in a container instead of in the app image.
+#
+#   docker compose -f docker-compose.yml -f compose/extraction-docling.yml \
+#     --profile docling up -d
+#
+# or simply:  ./bin/kb up docling
+#
+# The app then needs no Docling at all — leave APP_VARIANT=slim. If the service is down,
+# ingestion falls back to PyMuPDF and says so in the ingest log.
+services:
+  app:
+    environment:
+      PDFKB_DOCLING_URL: http://docling:5001

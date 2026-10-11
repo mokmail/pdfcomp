@@ -1,0 +1,15 @@
+# Redis Stack · RediSearch vectors
+#
+#   docker compose -f docker-compose.yml -f compose/vector-redis.yml \
+#     --profile redis up -d
+#
+# or simply:  ./bin/kb up redis
+#
+# It does two things: starts the `redis` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: redis
+      PDFKB_VECTOR_URL: redis://redis:6379

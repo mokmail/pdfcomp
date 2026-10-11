@@ -1,0 +1,16 @@
+# MongoDB · local stand-in for an Atlas cluster
+#
+#   docker compose -f docker-compose.yml -f compose/vector-mongodb.yml \
+#     --profile mongodb up -d
+#
+# or simply:  ./bin/kb up mongodb
+#
+# It does two things: starts the `mongodb` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: mongodb
+      PDFKB_VECTOR_URL: mongodb://knowledgebases:knowledgebases@mongodb:27017
+      PDFKB_VECTOR_COLLECTION: pdf_chunks

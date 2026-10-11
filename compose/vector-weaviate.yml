@@ -1,0 +1,15 @@
+# vector database · anonymous access, no vectorizer module
+#
+#   docker compose -f docker-compose.yml -f compose/vector-weaviate.yml \
+#     --profile weaviate up -d
+#
+# or simply:  ./bin/kb up weaviate
+#
+# It does two things: starts the `weaviate` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: weaviate
+      PDFKB_VECTOR_URL: http://weaviate:8080

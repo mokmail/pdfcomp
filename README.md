@@ -332,12 +332,65 @@ PDFKB_DOCLING_URL=http://docling:5001
 | Typesense | `typesense` | `http://typesense:8108` |
 | MongoDB | `mongodb` | `mongodb://knowledgebases:knowledgebases@mongodb:27017` |
 
-Server backends need their client library inside the app image — bake it in rather than
-installing it at runtime, which a container loses when it is recreated:
+### Pick a variant — never install what you do not use
+
+The image comes in variants (Dockerfile build targets), so a laptop that searches locally
+does not carry nine database clients, and a box that runs Docling as a service does not
+carry torch twice:
+
+| target | what it adds | about |
+|---|---|---|
+| `slim` *(default)* | nothing — PyMuPDF + Chroma + the web app; embedded vector stores only | 952 MB |
+| `clients` | every self-hosted vector client: qdrant, opensearch/elasticsearch, weaviate, milvus, pgvector, redis, typesense, mongodb | 1.2 GB |
+| `docling` | Docling (torch and friends) for in-process extraction | ~5 GB |
+| `full` | clients + docling | ~5.5 GB |
+| `custom` | exactly what `VECTOR_CLIENTS` / `WITH_DOCLING` name | varies |
+
+```bash
+docker build -t knowledgebases .                     # slim
+docker build --target clients -t knowledgebases .    # + clients
+docker build --target docling -t knowledgebases .    # + docling
+docker build --target custom  -t knowledgebases . \  # + what you name
+  --build-arg VECTOR_CLIENTS="qdrant-client" --build-arg WITH_DOCLING=0
+```
+
+`docker-compose.yml` selects it with `APP_VARIANT` (`slim` unless you say otherwise), and
+every variant ends its build by importing the app: a client library that would silently move
+starlette underneath the app fails the build instead of shipping a crash-looping image.
+
+### The picker: `./bin/kb`
+
+One command per choice — it assembles the profiles, the overlays and the image target:
+
+```bash
+./bin/kb up                    # app + Ollama, slim image, embedded vectors
+./bin/kb up qdrant             # + Qdrant, app already pointed at it, target `clients`
+./bin/kb up docling            # + extraction as a service (app stays slim, no torch)
+./bin/kb up qdrant docling     # both, target `full`
+./bin/kb up opensearch         # or elasticsearch weaviate pgvector redis milvus
+                               #    typesense mongodb
+./bin/kb build qdrant          # just build that variant's image
+./bin/kb variants              # what you can ask for, with sizes
+./bin/kb show qdrant docling   # the exact docker command, without running it
+./bin/kb ps | logs | down | destroy
+```
+
+Underneath it is plain `docker compose` with per-database overlays (`compose/vector-qdrant.yml`,
+`compose/extraction-docling.yml`, …), so you can use those directly if you prefer:
+
+```bash
+docker compose -f docker-compose.yml -f compose/vector-qdrant.yml --profile qdrant up -d
+```
+
+If `PDFKB_OLLAMA_URL` points at the host (`http://host.docker.internal:11434`), the picker
+starts only what the variant needs — no Ollama container, no model re-download.
+
+Server backends need their client library inside the app image — that is what the `clients`
+target is for. Installing one at runtime works but a container loses it when it is recreated:
 
 ```ini
 VECTOR_CLIENTS=qdrant-client          # space-separated: qdrant-client weaviate-client pymilvus …
-WITH_DOCLING=0                        # 1 = Docling inside the app image too (heavy)
+WITH_DOCLING=0                        # 1 = Docling inside the app image as well (heavy)
 ```
 
 An **empty knowledge base directory is not "no vectors"**: `chroma`, `sqlite` and

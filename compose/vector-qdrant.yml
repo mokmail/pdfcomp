@@ -1,0 +1,15 @@
+# vector database · REST 6333, dashboard http://localhost:6333/dashboard
+#
+#   docker compose -f docker-compose.yml -f compose/vector-qdrant.yml \
+#     --profile qdrant up -d
+#
+# or simply:  ./bin/kb up qdrant
+#
+# It does two things: starts the `qdrant` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: qdrant
+      PDFKB_VECTOR_URL: http://qdrant:6333

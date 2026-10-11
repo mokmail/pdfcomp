@@ -33,6 +33,9 @@ services:
   app:
     build:
       context: .
+      # slim | clients | docling | full | custom — see the Dockerfile table.
+      # ./bin/kb picks this for you from the variant you ask for.
+      target: ${APP_VARIANT:-slim}
       args:
         VECTOR_CLIENTS: ${VECTOR_CLIENTS:-}
         WITH_DOCLING: ${WITH_DOCLING:-0}

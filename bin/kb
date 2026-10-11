@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Knowledgebases — pick a variant and the stack is assembled for you.
+#
+#   ./bin/kb up                      the app + Ollama, lean image, embedded vectors
+#   ./bin/kb up qdrant               + Qdrant, app pointed at it, client baked in
+#   ./bin/kb up docling              + extraction as its own service (app stays slim)
+#   ./bin/kb up qdrant docling       both, image target `full`
+#   ./bin/kb up opensearch           any of: qdrant opensearch elasticsearch weaviate
+#                                           pgvector redis milvus typesense mongodb
+#
+#   ./bin/kb build [variant…]        build just the image for that choice
+#   ./bin/kb ps | logs [service] | down | destroy
+#   ./bin/kb variants                what you can ask for
+#   ./bin/kb show [variant…]         the exact docker command, without running it
+#
+# Everything is `docker compose` underneath — no wrapper magic, no hidden state. The
+# script only decides two things: which image target to build (slim / clients / docling /
+# full) and which compose overlays and profiles to switch on.
+set -eo pipefail
+
+cd "$(dirname "$0")/.."
+
+VECTORS=" qdrant opensearch elasticsearch weaviate pgvector redis milvus typesense mongodb "
+VECTOR_NAMES="qdrant opensearch elasticsearch weaviate pgvector redis milvus typesense mongodb"
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+
+variants() {
+  cat <<EOF
+image targets   slim        embedded vector stores only (chroma · sqlite · hnswlib)   ~1.0 GB
+                clients     + every self-hosted vector-database client                ~1.3 GB
+                docling     + Docling inside the app image (heavy)                     ~5 GB
+                full        + clients and docling                                     ~5.5 GB
+                custom      exactly what VECTOR_CLIENTS / WITH_DOCLING name           varies
+
+vector store    $(echo $VECTOR_NAMES | fold -s -w 74 | sed 's/^/                /')
+
+extraction      docling     Docling as a service, so the app image stays slim
+                (nothing)   in-process Docling if the image has it, else PyMuPDF
+EOF
+}
+
+action="${1:-up}"
+shift || true
+
+vectors=()
+want_docling=0
+for arg in "$@"; do
+  case "$VECTORS" in
+    *" $arg "*) vectors+=("$arg"); continue ;;
+  esac
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    docling)   want_docling=1 ;;
+    *) echo "unknown variant: $arg" >&2; echo; variants >&2; exit 2 ;;
+  esac
+done
+
+compose_files=(-f docker-compose.yml)
+for v in "${vectors[@]:-}"; do
+  [ -n "$v" ] && compose_files+=(-f "compose/vector-$v.yml")
+done
+[ "$want_docling" = 1 ] && compose_files+=(-f compose/extraction-docling.yml)
+
+profiles=()
+for v in "${vectors[@]:-}"; do [ -n "$v" ] && profiles+=(--profile "$v"); done
+[ "$want_docling" = 1 ] && profiles+=(--profile docling)
+
+# The smallest image that can do what was asked for: a server vector store needs its
+# client, and in-process Docling needs docling. A docling *service* needs neither.
+if [ "${#vectors[@]}" -gt 0 ]; then target=clients; else target=slim; fi
+if [ "$want_docling" = 1 ] && [ "$target" = clients ]; then target=full; fi
+if [ "$want_docling" = 1 ] && [ "$target" = slim ]; then target=docling; fi
+# …unless the user pinned one deliberately.
+target="${APP_VARIANT:-$target}"
+
+export APP_VARIANT="$target"
+[ -f .env ] && set -a && . ./.env && set +a || true
+export APP_VARIANT="$target"      # .env must not silently override the choice
+export COMPOSE_PROFILES=""
+
+cmd=(docker compose "${compose_files[@]}" "${profiles[@]}")
+
+# Pointed at the host's Ollama (the usual case on a laptop)? Then do not start — or even
+# pull — the ollama container: start only what this variant actually needs.
+host_ollama=0
+case "${PDFKB_OLLAMA_URL:-}" in
+  *host.docker.internal*|*://localhost*|*://127.0.0.1*) host_ollama=1 ;;
+esac
+services=(app)
+for v in "${vectors[@]:-}"; do [ -n "$v" ] && services+=("$v"); done
+[ "$want_docling" = 1 ] && services+=(docling)
+
+case "$action" in
+  up)      echo "# variant: ${target} image · vectors: ${vectors[*]:-embedded} · docling: $([ "$want_docling" = 1 ] && echo service || echo in-image-or-fallback)"
+           if [ "$host_ollama" = 1 ]; then
+             echo "# using the host's Ollama at ${PDFKB_OLLAMA_URL} — starting only: ${services[*]}"
+             echo "+ ${cmd[*]} up -d --build --no-deps ${services[*]}"
+             "${cmd[@]}" up -d --build --no-deps "${services[@]}"
+           else
+             echo "+ ${cmd[*]} up -d --build"
+             "${cmd[@]}" up -d --build
+           fi ;;
+  build)   echo "+ docker build --target ${target} -t \${APP_IMAGE:-knowledgebases:latest} ."
+           docker build --target "$target" -t "${APP_IMAGE:-knowledgebases:latest}" . ;;
+  ps)      "${cmd[@]}" ps ;;
+  logs)    "${cmd[@]}" logs -f "${1:-app}" ;;
+  down)    "${cmd[@]}" down ;;
+  destroy) echo "this deletes the containers AND the volumes (knowledge bases included)"; 
+           read -r -p "type 'destroy' to confirm: " a; [ "$a" = destroy ] || exit 1
+           "${cmd[@]}" down -v ;;
+  show)    echo "+ APP_VARIANT=$target ${cmd[*]} up -d --build" ;;
+  variants) variants ;;
+  -h|--help|help) usage ;;
+  *) echo "unknown action: $action" >&2; usage >&2; exit 2 ;;
+esac

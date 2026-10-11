@@ -1,0 +1,16 @@
+# Milvus standalone · brings up etcd and minio with it
+#
+#   docker compose -f docker-compose.yml -f compose/vector-milvus.yml \
+#     --profile milvus up -d
+#
+# or simply:  ./bin/kb up milvus
+#
+# It does two things: starts the `milvus` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: milvus
+      PDFKB_VECTOR_URL: http://milvus:19530
+      PDFKB_VECTOR_COLLECTION: pdf_chunks

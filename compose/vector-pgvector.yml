@@ -1,0 +1,15 @@
+# PostgreSQL + pgvector · password from POSTGRES_PASSWORD
+#
+#   docker compose -f docker-compose.yml -f compose/vector-pgvector.yml \
+#     --profile pgvector up -d
+#
+# or simply:  ./bin/kb up pgvector
+#
+# It does two things: starts the `pgvector` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: pgvector
+      PDFKB_VECTOR_URL: postgresql://postgres:knowledgebases@pgvector:5432/knowledgebases

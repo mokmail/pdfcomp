@@ -1,0 +1,16 @@
+# k-NN search · single node, security plugin off, 512 MB heap
+#
+#   docker compose -f docker-compose.yml -f compose/vector-opensearch.yml \
+#     --profile opensearch up -d
+#
+# or simply:  ./bin/kb up opensearch
+#
+# It does two things: starts the `opensearch` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: opensearch
+      PDFKB_VECTOR_URL: http://opensearch:9200
+      PDFKB_VECTOR_COLLECTION: pdf_chunks

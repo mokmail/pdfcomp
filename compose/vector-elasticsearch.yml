@@ -1,0 +1,16 @@
+# dense_vector search · single node, security off, 512 MB heap
+#
+#   docker compose -f docker-compose.yml -f compose/vector-elasticsearch.yml \
+#     --profile elasticsearch up -d
+#
+# or simply:  ./bin/kb up elasticsearch
+#
+# It does two things: starts the `elasticsearch` service (through its profile) and tells the app
+# to use it. The app image must carry the client library — that is what the `clients`
+# build target (and ./bin/kb) is for.
+services:
+  app:
+    environment:
+      PDFKB_VECTOR_BACKEND: elasticsearch
+      PDFKB_VECTOR_URL: http://elasticsearch:9200
+      PDFKB_VECTOR_COLLECTION: pdf_chunks
