@@ -195,9 +195,10 @@ summary[open] > .chev, summary[open] > .setup-caret{ transform:rotate(180deg) }
 
 /* --------------------------------------------------------------- main */
 .container{ max-width:var(--page); margin:0 auto; padding:40px 28px 64px }
-/* the footer is pinned to the bottom of the window, so the page keeps that much room free
-   — measured into --foot-h, because the facts strip rewraps and changes the height */
-body{ padding-bottom:var(--foot-h, 150px) }
+/* The pinned line at the bottom of the window is exactly one row tall, so the page reserves
+   the room for it here in CSS — nothing to measure, and nothing can end up behind it. */
+:root{ --bar-h:34px }
+body{ padding-bottom:var(--bar-h) }
 
 /* ------------------------------------------------ landing search field */
 .search-hero{ max-width:920px; margin:0 auto 44px; text-align:center }
@@ -477,14 +478,10 @@ dialog.rmodal:not([open]){ display:none }   /* a closed dialog is gone, not just
 }
 
 /* ---------------------------------------------------------------- footer
-   The credits sit under the page and stay there: the footer is pinned to the bottom of the
-   window, so who built it and what this installation is are always a glance away. The facts
-   strip is a grid of label-over-value cells with hairlines in the gaps; the page leaves the
-   measured height free (--foot-h) so nothing ever hides behind it. */
-.site-foot{
-  position:fixed; left:0; right:0; bottom:0; z-index:39;
-  border-top:1px solid rgb(var(--line-dim)); background:rgb(var(--bg-panel));
-}
+   The colophon sits under the page in the normal flow — the tool and its one-line job, who
+   built it, where it lives, over a grid of facts about this installation. In the flow it can
+   never cover anything; the numbers you want without scrolling are in the pinned line below. */
+.site-foot{ border-top:1px solid rgb(var(--line-dim)); background:rgb(var(--bg-panel)) }
 /* the facts strip: label over value, one hairline between cells */
 .site-foot .foot-facts{
   max-width:var(--page); margin:0 auto; padding:0 28px;
@@ -516,6 +513,37 @@ dialog.rmodal:not([open]){ display:none }   /* a closed dialog is gone, not just
 .foot-link:hover{ border-bottom-color:rgb(var(--acc-2)/.55) }
 .foot-link .ic{ width:11px; height:11px; margin-left:4px; opacity:.75 }
 .foot-sep{ color:rgb(var(--text-faint)/.55); margin:0 5px }
+
+/* --------------------------------------------------- the pinned status line
+   One row at the bottom of the window: what the app is doing, what is in the active knowledge
+   base, and what is serving it. Fixed height, nowrap and an ellipsis, so the room reserved for
+   it in the body's padding-bottom is always exactly right whatever the window width — that is
+   what keeps it from ever covering the content. */
+.site-bar{
+  position:fixed; left:0; right:0; bottom:0; height:var(--bar-h); z-index:39;
+  border-top:1px solid rgb(var(--line-dim)); background:rgb(var(--bg-panel));
+}
+.site-bar-inner{
+  max-width:var(--page); height:100%; margin:0 auto; padding:0 28px;
+  display:flex; align-items:center; gap:16px;
+  font-family:var(--font-mono); font-size:11px; line-height:1; color:rgb(var(--text-faint));
+  white-space:nowrap; overflow:hidden;
+}
+.bar-state{ flex:0 0 auto; display:flex; align-items:center; gap:7px; color:rgb(var(--text-dim)) }
+.bar-state .dot{ width:6px; height:6px; border-radius:50%; background:rgb(var(--acc-1));
+                 box-shadow:0 0 0 3px rgb(var(--acc-1)/.15) }
+.bar-state.run .dot{ background:rgb(var(--acc-warn)); box-shadow:0 0 0 3px rgb(var(--acc-warn)/.18) }
+.bar-state.bad .dot{ background:rgb(var(--acc-bad)); box-shadow:0 0 0 3px rgb(var(--acc-bad)/.18) }
+.bar-line{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+           color:rgb(var(--text-dim)) }
+.bar-line b{ color:rgb(var(--text-ghost)); font-weight:500 }
+.bar-line .kb{ color:rgb(var(--acc-2)) }
+.bar-line .sep{ color:rgb(var(--text-faint)/.55); margin:0 7px }
+.bar-brand{ flex:0 0 auto; color:rgb(var(--acc-2)); text-decoration:none;
+            border-bottom:1px solid transparent; transition:border-color .15s }
+.bar-brand:hover{ border-bottom-color:rgb(var(--acc-2)/.55) }
+.bar-brand .ic{ width:11px; height:11px; margin-right:4px; opacity:.75; vertical-align:-1px }
+@media (max-width:820px){ .bar-line .hide-sm{ display:none } }
 
 /* ------------------------------------------------------------ status */
 .statusbar{ display:none }

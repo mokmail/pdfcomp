@@ -1137,20 +1137,38 @@ function paintFooter(s) {
     + `<span class="fk">${esc(k)}</span><span class="fv">${esc(String(v))}</span></span>`).join("");
   const ver = $("#foot-version");
   if (ver) ver.textContent = a.version ? `v${a.version}` : "";
+
+  /* The pinned line at the bottom of the window: the state, then the numbers worth a glance,
+     in one row. It is exactly --bar-h tall, which is exactly what the page reserves for it, so
+     it can never cover the content — the full colophon above stays in the page flow. */
+  const ing = (s && s.ingest) || {};
+  const stEl = $("#bar-state"), stText = $("#bar-state-text");
+  if (stEl && stText) {
+    const kind = ing.running ? " run" : (s.ok === false ? " bad" : "");
+    stEl.className = "bar-state" + kind;
+    stText.textContent = ing.running
+      ? `indexing ${ing.filename || "…"}${ing.total > 1 ? ` ${ing.index}/${ing.total}` : ""} ${ing.pct || 0}%`
+      : (s.ok === false ? "job failed" : "ready");
+  }
+  const bits = [
+    `<b>${s.documents ?? 0}</b> documents`,
+    a.pages != null ? `${a.pages} pages` : null,
+    `${s.chunks ?? 0} chunks`,
+    `${s.vectors ?? 0} vectors`,
+    s.library ? `<span class="hide-sm">kb</span> <span class="kb">${esc(s.library)}</span>` : null,
+    s.provider ? `<span class="hide-sm">${esc(String(s.provider).split(" (")[0])}</span>` : null,
+    s.extractor ? `<span class="hide-sm">${esc(s.extractor)}</span>` : null,
+    s.vector_backend
+      ? `<span class="hide-sm">${esc(s.vector_backend)} · ${esc(s.vector_collection || "pdf_chunks")}</span>` : null,
+  ].filter(Boolean);
+  const barLine = $("#bar-line");
+  if (barLine) barLine.innerHTML = bits.join('<span class="sep">·</span>');
 }
 const footYear = $("#foot-year");
 if (footYear) footYear.textContent = String(new Date().getFullYear());
 
-/* The footer is pinned to the bottom of the window, so the page has to leave exactly its
-   height free — measured, because the facts strip rewraps with the window width. */
-function measureFooter() {
-  const f = document.querySelector(".site-foot");
-  if (f) document.documentElement.style.setProperty("--foot-h", Math.ceil(f.getBoundingClientRect().height) + "px");
-}
-measureFooter();
-addEventListener("resize", measureFooter);
-requestAnimationFrame(measureFooter);
-addEventListener("load", measureFooter);
+/* No measurement is needed for the pinned line: it is one fixed-height row, and the page
+   reserves exactly that much room in CSS (body padding-bottom = --bar-h). */
 
 
 /* --------------------------------------------------------------- init */

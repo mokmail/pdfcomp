@@ -398,6 +398,17 @@
   </div>
 </dialog>
 
+<!-- the pinned line at the bottom of the window: the state, the counts, what is serving them,
+     and the way home. Exactly one row (--bar-h) — the page reserves that much room, so it can
+     never cover the content, and the full colophon above stays in the page flow. -->
+<div class="site-bar" id="site-bar">
+  <div class="site-bar-inner">
+    <span class="bar-state" id="bar-state"><span class="dot"></span><span id="bar-state-text">ready</span></span>
+    <span class="bar-line" id="bar-line"></span>
+    <a class="bar-brand" href="https://kmail.at" target="_blank" rel="noopener" data-ic="external">kmail.at</a>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

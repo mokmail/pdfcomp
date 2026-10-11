@@ -395,20 +395,29 @@ EVAL_JS = r"""
     lsSetup: localStorage.getItem('pdfkb-setup'),
     bar: (() => {
       const h = document.querySelector('.site-header');
-      const f = document.querySelector('.site-foot');
-      const hr = h.getBoundingClientRect(), fr = f.getBoundingClientRect(), cs = getComputedStyle(f);
+      const b = document.querySelector('.site-bar');
+      const hr = h.getBoundingClientRect();
+      const br = b.getBoundingClientRect(), bs = getComputedStyle(b);
       return { headerPosition: getComputedStyle(h).position, headerTop: Math.round(hr.top),
-               position: cs.position, bottom: Math.round(fr.bottom),
-               viewport: window.innerHeight, height: Math.round(fr.height),
-               pageRoom: getComputedStyle(document.body).paddingBottom };
+               exists: true, position: bs.position, bottom: Math.round(br.bottom),
+               top: Math.round(br.top), viewport: window.innerHeight, height: Math.round(br.height),
+               pageRoom: getComputedStyle(document.body).paddingBottom,
+               line: (document.querySelector('#bar-line') || {}).textContent || '',
+               state: (document.querySelector('#bar-state-text') || {}).textContent || '',
+               brandHref: (document.querySelector('.bar-brand') || {}).getAttribute
+                          ? document.querySelector('.bar-brand').getAttribute('href') : null };
     })(),
     foot: (() => {
       const f = document.querySelector('.site-foot');
       if (!f) return null;
       const link = f.querySelector('.foot-link');
+      const fr = f.getBoundingClientRect();
       const facts = [...f.querySelectorAll('.fact')].map(e => [e.querySelector('.fk').textContent.trim(),
                                                               e.querySelector('.fv').textContent.trim()]);
       return { exists: true, text: f.textContent.replace(/\s+/g, ' ').trim(),
+               position: getComputedStyle(f).position,
+               top: Math.round(fr.top), bottom: Math.round(fr.bottom),
+               docH: document.body.scrollHeight,
                developer: /Mohammed Kmail/.test(f.textContent),
                linkHref: link && link.getAttribute('href'),
                linkText: link && link.textContent.trim(),
@@ -808,17 +817,32 @@ async def dom_checks():
                   d.get("footerGone") is True)
             bar = d.get("bar") or {}
             htop = bar.get("headerTop")          # 0 is a valid top — `or` would turn it into 99
+            ft = d.get("foot") or {}
             check("the header is still sticky at the top of the window",
                   bar.get("headerPosition") == "sticky" and htop is not None and abs(htop) <= 2,
                   f"{bar.get('headerPosition')} at {htop}px")
-            check("the footer is pinned to the bottom of the window",
+            fbot, fdoc, bh = ft.get("bottom"), ft.get("docH"), (bar.get("height") or 0)
+            gap = (fdoc - fbot) if (fbot is not None and fdoc is not None) else None
+            check("the colophon sits in the page flow, so it cannot cover the content",
+                  ft.get("position") in ("static", "relative") and gap is not None and gap >= 0
+                  # at the bottom of the scroll the colophon's last pixel sits exactly on the
+                  # pinned line's top edge: the page ends one line below the last content
+                  and abs(gap - bh) <= 2,
+                  f"position={ft.get('position')} · ends at {fbot} of {fdoc}"
+                  f" · the last {gap}px are the reserved line")
+            check("the status line is pinned to the bottom of the window",
                   bar.get("position") == "fixed"
                   and abs((bar.get("bottom") or 0) - (bar.get("viewport") or 0)) <= 2,
-                  f"position={bar.get('position')} bottom={bar.get('bottom')} viewport={bar.get('viewport')} h={bar.get('height')}")
-            check("the page leaves room for the pinned footer, so nothing hides under it",
+                  f"position={bar.get('position')} bottom={bar.get('bottom')} viewport={bar.get('viewport')}")
+            check("the page reserves exactly the pinned line's height",
                   (float((bar.get("pageRoom") or "0px").rstrip("px")) or 0) >= (bar.get("height") or 0),
-                  f"{bar.get('pageRoom')} reserved for a {bar.get('height')}px footer")
-            ft = d.get("foot") or {}
+                  f"{bar.get('pageRoom')} reserved for a {bar.get('height')}px line")
+            check("the pinned line reports the state and the counts, and links home",
+                  "documents" in (bar.get("line") or "")
+                  and any(ch.isdigit() for ch in (bar.get("line") or ""))
+                  and (bar.get("state") or "").strip() != ""
+                  and bar.get("brandHref") == "https://kmail.at",
+                  f"{bar.get('state')} · {(bar.get('line') or '')[:70]}")
             check("the footer credits the developer",
                   ft.get("developer") is True and "Designed and built by" in (ft.get("text") or ""),
                   (ft.get("text") or "")[:80])
