@@ -1,0 +1,14 @@
+# Never ship the knowledge bases, the settings, the git history or the notes.
+.git
+.gitignore
+kb_data
+data
+__pycache__
+*.pyc
+.venv
+venv
+.DS_Store
+result.png
+temp/
+.hermes
+tests/sample.pdf

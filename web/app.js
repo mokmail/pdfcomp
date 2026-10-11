@@ -940,10 +940,18 @@ function fillExtraction(r) {
   }
   xs.value = s.extractor || "pymupdf";
   $("#x-ocr").checked = String(s.docling_ocr || "false").toLowerCase() === "true";
+  $("#x-docling-url").value = s.docling_url || "";
   const d = env.docling || {};
+  const svc = d.service_url
+    ? `<div class="kvrow"><span class="kvk">docling service</span>`
+      + `<span class="kvv ${d.service_ready ? "ok" : "bad"}">${esc(d.service_url)}`
+      + ` — ${d.service_ready ? "answering" : "not answering"}</span></div>`
+    : "";
   $("#x-extras").innerHTML =
     kv("docling", d.installed ? `installed${d.version ? " " + d.version : ""}` : "not installed")
-    + (d.installed ? "" : kv("install", d.install_cmd || "python3 -m pip install docling"));
+    + svc
+    + ((d.installed || d.service_url) ? ""
+       : kv("install", d.install_cmd || "python3 -m pip install docling"));
   xNote();
 }
 
@@ -956,12 +964,22 @@ function xNote() {
   const note = $("#x-note");
   note.hidden = !(chosen && chosen.id === "docling");
   note.innerHTML = (chosen && chosen.id === "docling")
-    ? ((d.installed || chosen.available)
+    ? ((d.service_url && d.service_ready)
+        ? `Docling is the default extractor, served here by the <b>docling service</b> at `
+          + `<code>${esc(d.service_url)}</code>: layout- and table-aware, and it can OCR scans. `
+          + `The OCR switch below applies to it.`
+        : d.installed
         ? `Docling is the default extractor — installed${d.version ? ` ${esc(d.version)}` : ""}: `
           + `layout- and table-aware, and it can OCR scans. The OCR switch below applies to it.`
-        : `Docling is the default extractor but is <b>not installed on this machine</b>: ingestion `
-          + `falls back to PyMuPDF and says so in the ingest log. Install it with `
-          + `<code>${esc(d.install_cmd || "python3 -m pip install docling")}</code>, then re-ingest.`)
+        : (d.service_url
+            ? `Docling is the default extractor and a service is configured at `
+              + `<code>${esc(d.service_url)}</code>, but it is <b>not answering</b>: ingestion falls `
+              + `back to PyMuPDF and says so in the ingest log. Check that the container is up `
+              + `(<code>docker compose --profile docling up -d</code>).`
+            : `Docling is the default extractor but is <b>not installed on this machine</b>: ingestion `
+              + `falls back to PyMuPDF and says so in the ingest log. Install it with `
+              + `<code>${esc(d.install_cmd || "python3 -m pip install docling")}</code>, or point `
+              + `this app at a docling service container, then re-ingest.`))
     : "";
 }
 
@@ -970,6 +988,7 @@ $("#x-save").onclick = async () => {
   const r = await api.post("/api/settings/save", new URLSearchParams({
     extractor: $("#x-extractor").value,
     docling_ocr: $("#x-ocr").checked ? "true" : "false",
+    docling_url: $("#x-docling-url").value.trim(),
   }));
   setText("#x-result", r.ok
     ? `saved — extractor=${r.settings.extractor}  ocr=${r.settings.docling_ocr}`

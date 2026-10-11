@@ -362,7 +362,7 @@ def _list_local(cfg):
 
 def _list_http(cfg):
     url = cfg["url"]
-    r = requests.get(url, timeout=25, auth=_auth(cfg), headers={"User-Agent": "pdfkb/1.0"})
+    r = requests.get(url, timeout=25, auth=_auth(cfg), headers={"User-Agent": "knowledgebases/1.0"})
     r.raise_for_status()
     parser = _Links()
     parser.feed(r.text)
@@ -378,7 +378,7 @@ def _list_http(cfg):
 def _list_webdav(cfg):
     url = cfg["url"] if cfg["url"].endswith("/") else cfg["url"] + "/"
     r = requests.request("PROPFIND", url, timeout=25, auth=_auth(cfg),
-                         headers={"Depth": "1", "User-Agent": "pdfkb/1.0"})
+                         headers={"Depth": "1", "User-Agent": "knowledgebases/1.0"})
     r.raise_for_status()
     out, seen = [], set()
     for href in re.findall(r"<(?:[A-Za-z]+:)?href>(.*?)</(?:[A-Za-z]+:)?href>", r.text):
@@ -478,7 +478,7 @@ def _fetch_local(cfg, remote, dest):
 
 def _fetch_stream(cfg, remote, dest):
     with requests.get(remote, timeout=180, auth=_auth(cfg), stream=True,
-                      headers={"User-Agent": "pdfkb/1.0"}) as r:
+                      headers={"User-Agent": "knowledgebases/1.0"}) as r:
         r.raise_for_status()
         with open(dest, "wb") as fh:
             for chunk in r.iter_content(65536):
@@ -555,7 +555,7 @@ def _put_webdav(cfg, local, remote):
     url = urljoin(base, remote)
     with open(local, "rb") as fh:
         r = requests.put(url, data=fh, timeout=300, auth=_auth(cfg),
-                         headers={"User-Agent": "pdfkb/1.0"})
+                         headers={"User-Agent": "knowledgebases/1.0"})
     r.raise_for_status()
     return url
 
@@ -634,11 +634,11 @@ def test(cfg: dict):
             raise FileNotFoundError(f"not a folder: {root}")
         return f"folder ok — {sum(1 for _ in root.glob('**/*.pdf'))} pdf(s) · writable={os.access(root, os.W_OK)}"
     if ctype == "http":
-        r = requests.get(cfg["url"], timeout=20, auth=_auth(cfg), headers={"User-Agent": "pdfkb/1.0"})
+        r = requests.get(cfg["url"], timeout=20, auth=_auth(cfg), headers={"User-Agent": "knowledgebases/1.0"})
         return f"http {r.status_code} — {len(r.content)} bytes"
     if ctype == "webdav":
         r = requests.request("PROPFIND", cfg["url"], timeout=20, auth=_auth(cfg),
-                             headers={"Depth": "1", "User-Agent": "pdfkb/1.0"})
+                             headers={"Depth": "1", "User-Agent": "knowledgebases/1.0"})
         return f"webdav {r.status_code} — {len(r.content)} bytes"
     if ctype == "ssh":
         args, target = _ssh_base(cfg)

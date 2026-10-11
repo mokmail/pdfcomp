@@ -43,7 +43,7 @@ class App:
 
         self.theme = Theme(root, mode="light")
 
-        root.title("PDF Knowledge Base — Mohammed Kmail")
+        root.title("Knowledgebases — Mohammed Kmail")
         root.geometry("1080x760")
         root.minsize(860, 580)
         root.configure(background=self.theme.t["void"])

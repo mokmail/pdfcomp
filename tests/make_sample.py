@@ -41,7 +41,7 @@ PAGES = [
 
 def make(path, title="Sample Knowledge Base Document"):
     doc = pymupdf.open()
-    doc.set_metadata({"title": title, "author": "pdfkb sample"})
+    doc.set_metadata({"title": title, "author": "Knowledgebases sample"})
     for heading, paragraphs in PAGES:
         page = doc.new_page()
         y = 72

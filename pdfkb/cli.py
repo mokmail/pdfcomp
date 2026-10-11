@@ -95,7 +95,8 @@ def cmd_reset(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="pdfkb", description="PDF -> knowledge base -> semantic search")
+    p = argparse.ArgumentParser(prog="knowledgebases",
+                                description="Knowledgebases — PDF -> knowledge base -> semantic search")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("ingest", help="extract PDF(s) into the knowledge base")

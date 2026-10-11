@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PDF Knowledge Base — kmail.at</title>
+<title>Knowledgebases — kmail.at</title>
 <link rel="icon" href="/static/logo-mark.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,7 +18,7 @@
       <img class="mark" src="/static/logo-mark.png" alt="" width="24" height="24">
       <span class="brand-name">kmail.at</span>
     </a>
-    <span class="crumb"><span class="sep">/</span> tools <span class="sep">/</span> pdf-knowledge-base</span>
+    <span class="crumb"><span class="sep">/</span> tools <span class="sep">/</span> knowledgebases</span>
     <div class="header-right">
       <select id="lib-select" title="active knowledge base library" aria-label="knowledge base library"></select>
       <button class="btn ghost" id="job-badge" type="button" hidden></button>
@@ -197,6 +197,8 @@
         <label class="field"><span>extractor</span>
           <select id="x-extractor"></select></label>
         <label class="check"><input type="checkbox" id="x-ocr"> OCR scanned pages (docling only)</label>
+        <label class="field"><span>docling service URL</span>
+          <input id="x-docling-url" placeholder="http://docling:5001 — blank = docling inside this app"></label>
         <div class="actions">
           <button class="btn" id="x-save" type="button">Save extraction</button>
         </div>

@@ -1,4 +1,4 @@
-"""pdfkb — turn PDFs into a searchable, source-referenced knowledge base.
+"""Knowledgebases — turn PDFs into a searchable, source-referenced knowledge base.
 
 Pipeline:  PDF -> per-page text (PyMuPDF) -> overlapping chunks ->
 SQLite knowledge base (text + metadata) + Chroma vector store (embeddings).

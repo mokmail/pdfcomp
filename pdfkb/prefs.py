@@ -29,13 +29,14 @@ DEFAULTS = {
     # --- extraction ---
     "extractor": "docling",      # docling (preferred) | pymupdf — falls back with a note
     "docling_ocr": "false",      # docling: OCR scanned pages
+    "docling_url": config.DOCLING_URL,   # docling-serve URL, blank = in-process docling
     # --- storage (blank = derived from data_dir) ---
     "data_dir": str(config.DATA_DIR),
     "sqlite_path": "",           # knowledge base file
-    "vector_backend": "chroma",  # see vectors.BACKEND_SPECS
+    "vector_backend": config.VECTOR_BACKEND or "chroma",  # see vectors.BACKEND_SPECS
     "vector_path": "",           # local index directory (chroma/hnswlib)
-    "vector_collection": "pdf_chunks",
-    "vector_url": "",            # server backends: qdrant/opensearch/…
+    "vector_collection": config.VECTOR_COLLECTION or "pdf_chunks",
+    "vector_url": config.VECTOR_URL,     # server backends: qdrant/opensearch/…
     "vector_api_key": "",
     "vector_index": "",          # server index/collection name (blank = vector_collection)
     "text_dir": "",              # readable exports
@@ -56,7 +57,7 @@ STORAGE_KEYS = ("data_dir", "sqlite_path", "vector_backend", "vector_path",
                 "vector_collection", "vector_url", "vector_api_key", "vector_index",
                 "text_dir", "sources_dir")
 EMBED_KEYS = ("provider", "model", "ollama_url")
-EXTRACT_KEYS = ("extractor", "docling_ocr")
+EXTRACT_KEYS = ("extractor", "docling_ocr", "docling_url")
 _DICT_KEYS = {"libraries"}
 
 

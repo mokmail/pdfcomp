@@ -1,4 +1,4 @@
-"""Configuration for the pdfkb knowledge base tool."""
+"""Configuration for the Knowledgebases tool."""
 
 import os
 from pathlib import Path
@@ -22,6 +22,14 @@ CHUNK_OVERLAP = 200
 OLLAMA_URL = os.environ.get("PDFKB_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("PDFKB_EMBED_MODEL", "qwen3-embedding:0.6b")
 ST_MODEL = os.environ.get("PDFKB_ST_MODEL", "all-MiniLM-L6-v2")
+# Extraction can be delegated to a docling-serve container (see docker-compose.yml):
+# blank = use the in-process Docling, or PyMuPDF, exactly as before.
+DOCLING_URL = os.environ.get("PDFKB_DOCLING_URL", "").strip()
+# The vector store can be chosen entirely from the environment, so a compose stack is
+# declarative: PDFKB_VECTOR_BACKEND=qdrant PDFKB_VECTOR_URL=http://qdrant:6333
+VECTOR_BACKEND = os.environ.get("PDFKB_VECTOR_BACKEND", "").strip()
+VECTOR_URL = os.environ.get("PDFKB_VECTOR_URL", "").strip()
+VECTOR_COLLECTION = os.environ.get("PDFKB_VECTOR_COLLECTION", "").strip()
 HASH_DIM = 512                                # dimension of the offline fallback
 
 # Chroma add() batches.

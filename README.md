@@ -1,8 +1,13 @@
-# pdfkb — PDF extraction → knowledge base → semantic search
+# Knowledgebases — PDF extraction → knowledge base → semantic search
 
-`pdfkb` turns PDF files into searchable knowledge bases. It has a **web app**
-(branded as part of kmail.at), a CLI, and an optional desktop client. It evolved
-from the original `pdfcomp` PDF-compare GUI (kept under `legacy/`).
+**Knowledgebases** turns PDF files into searchable knowledge bases. It has a **web
+app** (branded as part of kmail.at, at `tools / knowledgebases`), a CLI, and an
+optional desktop client. It evolved from the original `pdfcomp` PDF-compare GUI
+(kept under `legacy/`).
+
+The tool is called **Knowledgebases**; the Python package keeps its short name
+`pdfkb` (and the `PDFKB_*` environment variables with it), so existing imports,
+launch agents and scripts keep working.
 
 For every PDF it extracts the text **per page**, splits it into overlapping
 chunks, and stores each chunk twice:
@@ -211,7 +216,8 @@ python3 -m pdfkb.cli search "your question" -k 10 --mode hybrid   # or semantic|
 python3 -m pdfkb.cli list | show <chunk_id> | export <doc_id> | delete <doc_id> | reset --yes
 ```
 
-`reset` requires `--yes`; over HTTP the bulk reset requires an explicit
+The module path stays `pdfkb.cli`; the tool names itself **Knowledgebases** in its
+help text. `reset` requires `--yes`; over HTTP the bulk reset requires an explicit
 `confirm=RESET` token.
 
 ## Design — the kmail.at look
@@ -260,11 +266,94 @@ destructive paths with their guards — **225 checks, all passing**. A focused
 check proves the same rule at the library level: a read-only knowledge base
 refuses to index, delete, wipe or export.
 
-## Docker
+## Roadmap
+
+**Not implemented yet** — recorded so the work is unambiguous when it is picked up.
+
+**Other file types besides PDF.** The pipeline already separates extraction from storage
+from presentation, so DOCX, XLSX, PPTX, HTML, Markdown, plain text, e-mail and images (OCR)
+can be indexed, searched and cited exactly the way a PDF is. It needs a format registry, a
+**locator** in place of the bare page number (`Sheet 2 · A1:F40`, `Slide 7`, `§ 4`), a
+widened ingest whitelist, the same type filter in every source connector, and a preview
+that falls back to *open in new tab* where the browser cannot render the original. PDF
+behaviour, existing knowledge bases, citations and vector ids stay as they are. The
+task-by-task plan is `.hermes/plans/2026-10-11_205850-more-file-types.md`.
+
+## Docker Compose — the app, Docling, and the vector databases
+
+The whole stack lives in `docker-compose.yml`. Everything except the app and Ollama is
+behind a **profile**, so nothing you did not ask for ever starts:
 
 ```bash
-docker build -t pdfkb .
-docker run --rm -p 8765:8765 -v $PWD/kb_data:/data pdfkb
+cp .env.example .env            # optional: uncomment what you need
+docker compose up -d            # the app (http://localhost:8765) + Ollama
+docker compose --profile docling up -d          # + extraction as its own service
+docker compose --profile qdrant up -d           # + Qdrant as the vector store
+docker compose logs -f app
+docker compose down             # keep the volumes; `down -v` deletes your knowledge bases
+```
+
+| service | what it is for | profile | host port |
+|---|---|---|---|
+| `app` | Knowledgebases itself — UI + JSON API, knowledge base and settings in the `kb` volume | *(default)* | 8765 |
+| `ollama` | embeddings (`qwen3-embedding:0.6b` by default) | *(default)* | 11434 |
+| `ollama-pull` | one-shot: pulls the embedding model, then exits | *(default)* | — |
+| `docling` | **Docling as a service** — layout/table-aware extraction with OCR, so the app image needs no Docling at all | `docling` | 5001 |
+| `qdrant` | vector database | `qdrant` | 6333, 6334 |
+| `opensearch` | k-NN vector search | `opensearch` | 9200 |
+| `elasticsearch` | dense-vector search | `elasticsearch` | 9300 → 9200 |
+| `weaviate` | vector database | `weaviate` | 8080 |
+| `pgvector` | PostgreSQL with the vector extension | `pgvector` | 5432 |
+| `redis` | Redis Stack (RediSearch vectors) | `redis` | 6379 |
+| `milvus` | Milvus standalone (+ its `etcd` and `minio`) | `milvus` | 19530 |
+| `typesense` | vector search | `typesense` | 8108 |
+| `mongodb` | MongoDB (Atlas-compatible local stand-in) | `mongodb` | 27017 |
+
+### Pointing the app at a service
+
+Either click it in **Settings → Storage → vector store** (then *Test vector store*), or
+make the stack declarative in `.env` — the app then boots already connected:
+
+```ini
+PDFKB_VECTOR_BACKEND=qdrant
+PDFKB_VECTOR_URL=http://qdrant:6333
+PDFKB_DOCLING_URL=http://docling:5001
+```
+
+| backend | `PDFKB_VECTOR_BACKEND` | `PDFKB_VECTOR_URL` |
+|---|---|---|
+| Qdrant | `qdrant` | `http://qdrant:6333` |
+| OpenSearch | `opensearch` | `http://opensearch:9200` |
+| Elasticsearch | `elasticsearch` | `http://elasticsearch:9200` |
+| Weaviate | `weaviate` | `http://weaviate:8080` |
+| pgvector | `pgvector` | `postgresql://postgres:knowledgebases@pgvector:5432/knowledgebases` |
+| Redis Stack | `redis` | `redis://redis:6379` |
+| Milvus | `milvus` | `http://milvus:19530` |
+| Typesense | `typesense` | `http://typesense:8108` |
+| MongoDB | `mongodb` | `mongodb://knowledgebases:knowledgebases@mongodb:27017` |
+
+Server backends need their client library inside the app image — bake it in rather than
+installing it at runtime, which a container loses when it is recreated:
+
+```ini
+VECTOR_CLIENTS=qdrant-client          # space-separated: qdrant-client weaviate-client pymilvus …
+WITH_DOCLING=0                        # 1 = Docling inside the app image too (heavy)
+```
+
+An **empty knowledge base directory is not "no vectors"**: `chroma`, `sqlite` and
+`hnswlib` are embedded and need no service at all, which is why the default profile runs
+just the app and Ollama. Switching the vector store of an existing knowledge base means
+re-ingesting — the app reports the collection stamp and says so when it does not match.
+
+The third-party database services deliberately carry **no healthcheck**: each image ships
+different tools, and a wrong probe is worse than none. The app's *Test vector store* button
+is the check that a database is really reachable, and it reports what it got.
+
+### Single container
+
+```bash
+docker build -t knowledgebases .
+docker run --rm -p 8765:8765 -v $PWD/kb_data:/data knowledgebases
 ```
 
 ## Legacy

@@ -1,4 +1,4 @@
-"""Starlette web app for the PDF knowledge base.
+"""Starlette web app for Knowledgebases.
 
 JSON API over the same `pdfkb` engine the CLI uses, plus a static front-end
 styled with the kmail.at design tokens.
@@ -36,7 +36,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import config, prefs, sources
 from .embeddings import get_embedder, list_ollama_models, probe_embedder  # noqa: F401
-from .extract import EXTRACTORS, docling_available, docling_version
+from .extract import EXTRACTORS, docling_available, docling_service_ready, docling_service_url, docling_version
 from .store import KB
 from .vectors import backends as vector_backends
 from .vectors import make_vector_store
@@ -215,10 +215,13 @@ def _env_info() -> dict:
                                       "install_cmd": "python3 -m pip install sentence-transformers",
                                       "default_model": config.ST_MODEL},
             "providers": prefs.PROVIDERS,
-            "extractors": [{**e, "available": (e["id"] != "docling") or docling_available()}
+            "extractors": [{**e, "available": (e["id"] != "docling")
+                            or docling_available() or bool(docling_service_url())}
                            for e in EXTRACTORS],
             "docling": {"installed": docling_available(), "version": docling_version(),
-                        "install_cmd": "python3 -m pip install docling"},
+                        "install_cmd": "python3 -m pip install docling",
+                        "service_url": docling_service_url(),
+                        "service_ready": docling_service_ready()},
             "vector_backends": vector_backends(),
             "defaults": {"ollama_model": config.OLLAMA_EMBED_MODEL},
             "job": dict(_job)}

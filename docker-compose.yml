@@ -1,0 +1,289 @@
+# Knowledgebases — the whole stack in one file.
+#
+#   docker compose up -d                          # the app + Ollama (embeddings)
+#   docker compose --profile docling up -d        # + Docling as a service (extraction)
+#   docker compose --profile qdrant up -d         # + Qdrant as the vector store
+#   docker compose --profile elasticsearch up -d  # + Elasticsearch instead
+#
+# Everything optional is behind a profile, so nothing you did not ask for ever starts.
+# The app reaches the others by service name — e.g. vector URL http://qdrant:6333 — and
+# `.env` (see .env.example) is what makes the stack declarative:
+#
+#   PDFKB_VECTOR_BACKEND=qdrant
+#   PDFKB_VECTOR_URL=http://qdrant:6333
+#   PDFKB_DOCLING_URL=http://docling:5001
+#
+# Copy .env.example to .env and uncomment what you need. The settings page overrides
+# all of it at runtime; the app's "Test vector store" button is the check that a
+# database you started is really reachable.
+
+name: ${COMPOSE_PROJECT_NAME:-knowledgebases}
+
+x-app-env: &app-env
+  PDFKB_DATA_DIR: /data
+  PDFKB_OLLAMA_URL: ${PDFKB_OLLAMA_URL:-http://ollama:11434}
+  PDFKB_EMBED_MODEL: ${PDFKB_EMBED_MODEL:-qwen3-embedding:0.6b}
+  PDFKB_DOCLING_URL: ${PDFKB_DOCLING_URL:-}
+  PDFKB_VECTOR_BACKEND: ${PDFKB_VECTOR_BACKEND:-}
+  PDFKB_VECTOR_URL: ${PDFKB_VECTOR_URL:-}
+  PDFKB_VECTOR_COLLECTION: ${PDFKB_VECTOR_COLLECTION:-}
+
+services:
+  # ------------------------------------------------------------------ the app
+  app:
+    build:
+      context: .
+      args:
+        VECTOR_CLIENTS: ${VECTOR_CLIENTS:-}
+        WITH_DOCLING: ${WITH_DOCLING:-0}
+    image: ${APP_IMAGE:-knowledgebases:latest}
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8765}:8765"
+    volumes:
+      - kb:/data
+      # Mount a folder of documents to use as a `local` source, if you like:
+      # - ${DOCS_DIR:-./docs}:/docs:ro
+    environment:
+      <<: *app-env
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/api/stats', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ------------------------------------------------- embeddings (Ollama)
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # NVIDIA GPU: uncomment, and install the container toolkit on the host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+  # Pulls the embedding model once, then exits. Re-running is harmless.
+  ollama-pull:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${PDFKB_EMBED_MODEL:-qwen3-embedding:0.6b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------- extraction as a service
+  # Set PDFKB_DOCLING_URL=http://docling:5001 so the app uses it. The app image then
+  # needs no Docling at all, which is the point of running it in its own container.
+  docling:
+    profiles: [docling]
+    image: ${DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}
+    restart: unless-stopped
+    ports:
+      - "${DOCLING_PORT:-5001}:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+      DOCLING_SERVE_LOG_LEVEL: ${DOCLING_LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s        # the first start downloads models into the container
+
+  # ------------------------------------------------------- vector databases
+  # One profile each. Start only the one you want, then point the app at it in
+  # Settings → Storage (or through PDFKB_VECTOR_* in .env).
+  qdrant:
+    profiles: [qdrant]
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:latest}
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"      # REST + dashboard
+      - "6334:6334"                      # gRPC
+    volumes:
+      - qdrant:/qdrant/storage
+    # app settings: vector store = Qdrant · url = http://qdrant:6333
+
+  opensearch:
+    profiles: [opensearch]
+    image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2}
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch:/usr/share/opensearch/data
+    # app settings: vector store = OpenSearch (k-NN) · url = http://opensearch:9200
+    #               index = pdf_chunks   (needs VECTOR_CLIENTS=opensearch-py)
+
+  elasticsearch:
+    profiles: [elasticsearch]
+    image: ${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.15.3}
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTICSEARCH_PORT:-9300}:9200"
+    volumes:
+      - elasticsearch:/usr/share/elasticsearch/data
+    # app settings: vector store = Elasticsearch · url = http://elasticsearch:9200
+    #               index = pdf_chunks   (needs VECTOR_CLIENTS=opensearch-py)
+
+  weaviate:
+    profiles: [weaviate]
+    image: ${WEAVIATE_IMAGE:-cr.weaviate.io/semitechnologies/weaviate:1.28.4}
+    restart: unless-stopped
+    command:
+      - --host=0.0.0.0
+      - --port=8080
+      - --scheme=http
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    ports:
+      - "${WEAVIATE_PORT:-8080}:8080"
+    volumes:
+      - weaviate:/var/lib/weaviate
+    # app settings: vector store = Weaviate · url = http://weaviate:8080
+    #               (needs VECTOR_CLIENTS=weaviate-client)
+
+  pgvector:
+    profiles: [pgvector]
+    image: ${PGVECTOR_IMAGE:-pgvector/pgvector:pg17}
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knowledgebases}
+      POSTGRES_DB: ${POSTGRES_DB:-knowledgebases}
+    ports:
+      - "${PGVECTOR_PORT:-5432}:5432"
+    volumes:
+      - pgvector:/var/lib/postgresql/data
+    # app settings: vector store = PostgreSQL + pgvector
+    #               url = postgresql://postgres:knowledgebases@pgvector:5432/knowledgebases
+    #               (needs VECTOR_CLIENTS="psycopg[binary] pgvector")
+
+  redis:
+    profiles: [redis]
+    image: ${REDIS_IMAGE:-redis/redis-stack-server:latest}
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis:/data
+    # app settings: vector store = Redis Stack · url = redis://redis:6379
+    #               (needs VECTOR_CLIENTS=redis)
+
+  milvus:
+    profiles: [milvus]
+    image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.5.4}
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt: [seccomp:unconfined]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19530:19530"
+    volumes:
+      - milvus:/var/lib/milvus
+    depends_on: [etcd, minio]
+    # app settings: vector store = Milvus · url = http://milvus:19530 · index = pdf_chunks
+    #               (needs VECTOR_CLIENTS=pymilvus)
+
+  etcd:
+    profiles: [milvus]
+    image: ${ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.18}
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - milvus-etcd:/etcd
+
+  minio:
+    profiles: [milvus]
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus-minio:/minio_data
+
+  typesense:
+    profiles: [typesense]
+    image: ${TYPESENSE_IMAGE:-typesense/typesense:27.1}
+    restart: unless-stopped
+    command: --data-dir /data --api-key=${TYPESENSE_API_KEY:-knowledgebases} --enable-cors
+    ports:
+      - "${TYPESENSE_PORT:-8108}:8108"
+    volumes:
+      - typesense:/data
+    # app settings: vector store = Typesense · url = http://typesense:8108
+    #               index = pdf_chunks · API key as above (needs VECTOR_CLIENTS=typesense)
+
+  mongodb:
+    profiles: [mongodb]
+    image: ${MONGODB_IMAGE:-mongo:7}
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-knowledgebases}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-knowledgebases}
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongodb:/data/db
+    # app settings: vector store = MongoDB Atlas-compatible
+    #               url = mongodb://knowledgebases:knowledgebases@mongodb:27017
+    #               index = pdf_chunks (Atlas index name) (needs VECTOR_CLIENTS=pymongo)
+
+volumes:
+  kb:
+  ollama:
+  qdrant:
+  opensearch:
+  elasticsearch:
+  weaviate:
+  pgvector:
+  redis:
+  milvus:
+  milvus-etcd:
+  milvus-minio:
+  typesense:
+  mongodb:
