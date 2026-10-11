@@ -1,15 +1,20 @@
-FROM python
+# Headless image for the pdfkb CLI (GUI needs a display; run app.py natively).
+FROM python:3.11-slim
 
-RUN apt-get update -y
-ENV PYTHON_VERSION=3.9.12
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get upgrade -y
-RUN apt-get install pip -y
-RUN apt-get install tk -y
-RUN pip install pdf2image
-RUN pip install Pillow
-WORKDIR /
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
+# Data (kb.sqlite + chroma) persists in /data; mount a volume and/or point to
+# an embedding server via PDFKB_OLLAMA_URL / PDFKB_EMBED_MODEL.
+ENV PDFKB_DATA_DIR=/data
+VOLUME ["/data"]
 
-CMD ["python", "pdfcomp.py"]
+ENTRYPOINT ["python", "-m", "pdfkb.cli"]
+CMD ["list"]

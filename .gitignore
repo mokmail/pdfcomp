@@ -1,0 +1,11 @@
+# knowledge base + vector store data (generated locally)
+kb_data/
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# misc
+.DS_Store
+result.png
+temp/
