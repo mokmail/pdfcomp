@@ -36,12 +36,34 @@ directory** (default `kb_data/`; override the default with `PDFKB_DATA_DIR`):
 | `settings.json`     | provider, extraction, storage, libraries      |
 | `integrations.json` | saved source connections (mode 0600)          |
 
+### One writer, many readers
+
+Knowledge bases never share their content. Each library is its own directory, its
+own database file and its own vector collection, and only the **active** one is
+opened for writing:
+
+* a **new** library is created with its own container — the paths submitted with
+  the request are deliberately ignored, so two libraries cannot end up sharing a
+  database and a collection;
+* an existing library **cannot be moved onto** a container another one uses;
+* every other library is opened **read-only** for cross-library search: no
+  directories are created, no schema is applied, no WAL side files appear, and any
+  attempt to write through that handle raises
+  `this knowledge base is open read-only — only the active one (…) can save files`;
+* a library whose files are gone simply reads as empty — it is not given a new
+  database just because it was searched;
+* each base records the **collection** its embeddings went into
+  (`meta.vector_collection`), so a store that does not match is reported as
+  `mismatch … re-ingest` instead of silently returning another base's chunks.
+
 ### Source referencing
 
 Text and vectors share the same `chunk_id` (`<doc_id>-<index>`), and each chunk
 carries `doc_id`, `filename`, `page`, `chunk_index`, `start`, `end`. Results
-always report **file name + page**, link to `/api/pdf/<doc_id>#page=N` so the
-browser opens the source PDF at that page, and copy a citation (`report.pdf p.12`).
+always report **file name + page**, link to the source PDF at that page so the
+browser opens it there, and copy a citation (`report.pdf p.12`). Each hit also
+names the **library** it came from *and* the **knowledge base** behind it (the
+database file and the vector store) — leaf names only, so no server path leaks.
 
 ## Run
 
@@ -51,9 +73,27 @@ python3 serve.py                 # http://127.0.0.1:8765
 #   --host 0.0.0.0 --port 8765   to expose it, e.g. behind the NUC's Traefik
 ```
 
-Five tabs: **Add PDFs** · **Search** · **Sources** · **Settings** · **Library**.
-A header selector switches the active library, and a status indicator shows any
-install/`ollama pull` running — from any tab, with its live output in Settings.
+Four tabs: **Search** (the landing page) · **Sources** · **Settings** · **Library**.
+
+The header is: the brand bar (logo, wordmark, breadcrumb, active-library selector,
+theme switch) → **the menubar** → a **foldable info strip**, folded by default,
+that states the setup in force — embedding model, current knowledge base,
+extractor, vector store, collection, where it saves, and how much is indexed.
+While anything is being installed, pulled or indexed, a badge and a progress rule
+appear in that header from any tab.
+
+## Search
+
+Hybrid (semantic + keyword, fused by reciprocal rank), semantic, or keyword over
+any number of knowledge bases at once: a **Search within** control picks one or
+several libraries, and the fusion is by rank because scores from different stores
+and models are not comparable. Changing the mode, the result count or the scope
+re-runs the current query. Pressing Enter searches *and clears* the field.
+
+Each result row is clickable and opens the **original document** in a modal, at
+the page the hit came from, next to the matched chunk and the surrounding page
+text; the modal scrolls when the content is taller than the window. The search
+field carries the AI halo and sweeping ring in the brand palette.
 
 ## Settings
 
@@ -68,6 +108,24 @@ install/`ollama pull` running — from any tab, with its live output in Settings
   the app extracts with PyMuPDF and says so in the ingest log, so a missing
   optional extra never blocks ingestion.
 
+### Ingesting
+
+Files are added from the **Sources → Local files** section (pick files, or pick a
+folder; *force* re-reads ones already held). Ingesting reports per file, in plain
+words:
+
+```
+  ✓ indexed + embedded   report.pdf  —  12 pages, 34 chunks, docling
+  • already in the knowledge base — skipped   notes.pdf
+  ! no text to index   scan.pdf
+  ✕ failed — broken.pdf  not a PDF: broken.pdf
+
+2 indexed + embedded  ·  1 already in the knowledge base  ·  1 failed
+```
+
+The same counts appear in the header, with the elapsed time, so a run is visible
+from any page — and each file's progress (`indexing report.pdf 3/12 · 25%`) too.
+
 ### Deleting
 
 Deleting is total, on purpose. Removing a **document** drops its rows, chunks,
@@ -76,7 +134,8 @@ exactly what went. Removing a **knowledge base** deletes its whole data director
 — the database, the vector store, the exports and the stored sources — after
 listing how many documents it holds. Guards refuse to touch the active knowledge
 base, a directory another knowledge base still uses, or a directory that does not
-look like a knowledge base.
+look like a knowledge base (so a purge can never walk off with an unrelated
+folder).
 
 ### Embedding provider & model
 
@@ -115,21 +174,24 @@ storage backs the current knowledge-base file up first (`kb.sqlite.bak`).
 
 ### Libraries — multiple target knowledge bases
 
-Each library is a named storage profile (its own knowledge-base file, vector
-store and exports). Create one from the current settings, switch with the header
-selector, update the active one, delete the extras. Every switch backs the
-current knowledge base up. Each row shows its backend, document count and
-location, so it is obvious which collection you are searching.
+Each library is a named storage profile with its **own** knowledge-base file,
+vector store, exports and source copies. Create one from the current settings,
+switch with the header selector, update the active one, delete the extras. Every
+switch backs the current knowledge base up. Each row shows its backend, document
+count, container and vector **collection**, so it is obvious which one you are
+searching — and no two can ever end up pointing at the same files (see *One
+writer, many readers*).
 
 ## Sources (file servers + cloud)
 
-A source is a saved, read-only connection. Files are copied into `sources/` and
-ingested, so copies stay searchable even if the origin goes away. Connections can
-also be **written to** — save a document's PDF or its readable text back.
+A source is a saved, read-only connection. Files are copied into the active
+library's `sources/` and ingested, so copies stay searchable even if the origin
+goes away. Connections can also be **written to** — save a document's PDF or its
+readable text back.
 
 | type | what | needs |
 |---|---|---|
-| `local` | a folder — including synced cloud drives (iCloud Drive, Google Drive, OneDrive, Dropbox, Synology Drive, Nextcloud desktop clients); detected drives are offered as one-click presets | — |
+| `local` | a folder — including synced cloud drives (iCloud Drive, Google Drive, OneDrive, Dropbox, Synology Drive, Nextcloud desktop clients); detected drives are offered as one-click presets, and a **Browse** button picks the folder instead of typing a path | — |
 | `http` | an HTTP directory listing | — |
 | `webdav` | Nextcloud / ownCloud / Synology / Box / Yandex Disk | — |
 | `ssh` | a folder on a remote host over SSH/SFTP, using your own keys and `~/.ssh/config` | openssh |
@@ -159,6 +221,8 @@ geometry come from the live site's CSS custom properties (`:root` light, `.dark`
 dark) — near-grey panels, hairline borders, Inter for display type and JetBrains
 Mono for micro-labels. The header carries the site's logo mark, the `KMAIL.AT`
 wordmark and a breadcrumb; a **◐ DARK / ◐ LIGHT** button switches the pair live.
+The menubar sits above the setup strip and is deliberately flat — no boxes and no
+bottom border, the active tab is underlined in the brand gradient.
 
 On top of the neutral surfaces sits the **brand accent layer**, so the app is not
 black and white:
@@ -174,7 +238,10 @@ black and white:
 The search field's AI halo, sweeping ring and ✦ mark are drawn in that palette,
 and the header and result modal carry a brand gradient rule. Light-mode accents
 are deliberately darker — the vivid dark-theme values fall to 3–4:1 contrast on
-white — and coloured buttons take the brand ink `#0a0e0c` rather than white.
+white — and coloured buttons take the brand ink `#0a0e0c` rather than white. A
+verification pass audits the rendered page for both themes: every strong colour
+must be one of the brand hues, and none may be left over from the browser
+defaults.
 
 ## Tests
 
@@ -185,6 +252,13 @@ python3 tests/gui_smoke.py                       # desktop-client smoke test
 
 Verification of the web app is run against an **isolated** instance (its own
 `PDFKB_DATA_DIR` and port) so a test run can never touch a real knowledge base.
+The suite drives the HTTP API and the rendered page in headless Chrome, and
+covers extraction, providers, every reachable vector backend, storage switches,
+sources, safeguards, ingest progress, multi-library search, knowledge-base
+isolation (including that a read writes nothing into another base) and the
+destructive paths with their guards — **225 checks, all passing**. A focused
+check proves the same rule at the library level: a read-only knowledge base
+refuses to index, delete, wipe or export.
 
 ## Docker
 

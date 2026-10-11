@@ -21,48 +21,30 @@
     <span class="crumb"><span class="sep">/</span> tools <span class="sep">/</span> pdf-knowledge-base</span>
     <div class="header-right">
       <select id="lib-select" title="active knowledge base library" aria-label="knowledge base library"></select>
-      <span class="micro" id="provider"></span>
       <button class="btn ghost" id="job-badge" type="button" hidden></button>
       <button class="btn ghost" id="theme" type="button">◐  DARK</button>
     </div>
   </div>
+
   <nav class="tabs" aria-label="Tool sections">
-    <button class="tab is-active" data-panel="search" type="button">Search</button>
-    <button class="tab" data-panel="add" type="button">Add PDFs</button>
-    <button class="tab" data-panel="sources" type="button">Sources</button>
+    <button class="tab is-active" data-panel="search" data-n="" type="button">Search</button>
+    <button class="tab" data-panel="sources" data-n="" type="button">Sources</button>
     <button class="tab" data-panel="settings" type="button">Settings</button>
-    <button class="tab" data-panel="library" type="button">Library</button>
+    <button class="tab" data-panel="library" data-n="" type="button">Library</button>
   </nav>
+
+  <!-- the setup in force right now: folded by default, one line when closed -->
+  <details class="setupbar" id="setupbar">
+    <summary title="what is embedding, where it saves, what is reading — click to unfold">
+      <span class="setup-sum" id="setup-sum"></span>
+      <span class="setup-caret" aria-hidden="true">▾</span>
+    </summary>
+    <div class="inner" id="setup"></div>
+  </details>
   <div id="jobbar" aria-hidden="true"><i></i></div>
 </header>
 
 <main class="container">
-
-  <!-- ------------------------------------------------------------ add -->
-  <section class="panel" id="panel-add">
-    <p class="micro">Step 02 — Ingest</p>
-    <h2>Add PDFs to the knowledge base</h2>
-    <p class="lead">Each PDF is converted to text per page, split into overlapping chunks, and
-      stored twice: as text in a SQLite knowledge base and as embeddings in a vector store.
-      Source file + page are kept on every chunk so results stay traceable.</p>
-
-    <div class="actions">
-      <label class="btn primary">Add PDF files…
-        <input type="file" id="pick-files" accept="application/pdf,.pdf" multiple hidden>
-      </label>
-      <label class="btn">Add folder…
-        <input type="file" id="pick-folder" webkitdirectory directory multiple hidden>
-      </label>
-      <label class="check"><input type="checkbox" id="force"> Re-index if already added</label>
-    </div>
-
-    <div class="dropzone" id="drop">Drop PDFs here</div>
-    <div class="bar"><i id="bar"></i></div>
-    <pre class="log live" id="ingest-live" hidden></pre>
-
-    <p class="micro">Log</p>
-    <pre class="log" id="log"></pre>
-  </section>
 
   <!-- --------------------------------------------------------- search -->
   <section class="panel is-active" id="panel-search">
@@ -114,8 +96,31 @@
 
   <!-- -------------------------------------------------------- sources -->
   <section class="panel" id="panel-sources">
-    <p class="micro">Step 03 — Sources</p>
-    <h2>Connect a file server or other source</h2>
+    <p class="micro">Step 02 — Sources</p>
+    <h2>Local files</h2>
+    <p class="lead">Add PDFs straight from this machine — single files or a whole folder. Each one
+      is converted to text per page, split into overlapping chunks and stored twice: as text in the
+      SQLite knowledge base, as embeddings in the vector store. Source file + page stay on every
+      chunk, so results remain traceable to where they came from.</p>
+
+    <div class="actions">
+      <label class="btn primary">Add PDF files…
+        <input type="file" id="pick-files" accept="application/pdf,.pdf" multiple hidden>
+      </label>
+      <label class="btn">Add folder…
+        <input type="file" id="pick-folder" webkitdirectory directory multiple hidden>
+      </label>
+      <label class="check"><input type="checkbox" id="force"> Re-index if already added</label>
+    </div>
+
+    <div class="dropzone" id="drop">Drop PDFs here</div>
+    <div class="bar"><i id="bar"></i></div>
+    <pre class="log live" id="ingest-live" hidden></pre>
+
+    <p class="micro">Log</p>
+    <pre class="log" id="log"></pre>
+
+    <h2 style="margin-top:36px">Connect a file server or other source</h2>
     <p class="lead">Save a connection, scan it for PDFs, and ingest what you pick. Sources are
       read-only: files are copied into the knowledge base, so the copies stay searchable even if
       the origin goes away.</p>
@@ -178,7 +183,7 @@
 
   <!-- ------------------------------------------------------- settings -->
   <section class="panel" id="panel-settings">
-    <p class="micro">Step 04 — Configure</p>
+    <p class="micro">Step 03 — Configure</p>
     <h2>Extraction &amp; embedding</h2>
     <p class="lead">How each PDF becomes text, and which model turns that text into the vectors
       semantic search compares. Changing the embedding model changes the vector dimension, so
@@ -304,20 +309,21 @@
 
   <!-- -------------------------------------------------------- library -->
   <section class="panel" id="panel-library">
-    <p class="micro">Step 05 — Manage</p>
+    <p class="micro">Step 04 — Manage</p>
     <h2>Knowledge bases</h2>
-    <p class="lead">Each knowledge base is a named storage profile: its own knowledge-base file,
-      vector store and exports. Switch the active one to search or ingest into a different
-      collection; the current knowledge base is backed up on every switch.</p>
+    <p class="lead">Each knowledge base is its own container: its own directory, database, vector
+      store, exports and stored source copies, and its own embedding collection. Creating one gives
+      it a fresh container — it never inherits the paths of the one you are in, and it can never
+      read another one's files. Switching backs the current one up first.</p>
 
     <table id="libtable">
-      <thead><tr><th>Name</th><th>Backend</th><th>Documents</th><th>Location</th><th class="pick"></th></tr></thead>
+      <thead><tr><th>Name</th><th>Collection</th><th>Documents</th><th>Container</th><th class="pick"></th></tr></thead>
       <tbody></tbody>
     </table>
     <div class="actions">
       <input id="lib-name" type="text" spellcheck="false" placeholder="new knowledge base name" class="picker">
-      <button class="btn" id="lib-add" type="button">Save these settings as a knowledge base</button>
-      <button class="btn" id="lib-update" type="button">Update the active one</button>
+      <button class="btn primary" id="lib-add" type="button">Create a knowledge base</button>
+      <button class="btn" id="lib-update" type="button">Update the active one's paths</button>
     </div>
     <pre class="log" id="lib-result" hidden></pre>
 
@@ -333,8 +339,8 @@
       <button class="btn" id="refresh" type="button">Refresh</button>
       <button class="btn" id="open-any" type="button">Open PDF</button>
       <button class="btn" id="export" type="button">Export text</button>
-      <button class="btn" id="del" type="button">Delete</button>
-      <button class="btn ghost" id="reset" type="button" style="margin-left:auto">Reset knowledge base…</button>
+      <button class="btn danger" id="del" type="button">Delete</button>
+      <button class="btn danger ghost" id="reset" type="button" style="margin-left:auto">Reset knowledge base…</button>
     </div>
   </section>
 </main>
@@ -372,13 +378,6 @@
     <span class="micro" id="rmodal-note" style="margin-left:auto"></span>
   </div>
 </dialog>
-
-<footer class="statusbar">
-  <div class="inner">
-    <span id="status">Initialising…</span>
-    <span class="foot-brand">kmail.at</span>
-  </div>
-</footer>
 
 <script src="/static/app.js"></script>
 </body>

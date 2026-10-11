@@ -20,6 +20,7 @@ read back from SQLite, so one record stays the single source of truth.
 from __future__ import annotations
 
 import json
+import sqlite3
 import struct
 import uuid
 from pathlib import Path
@@ -170,12 +171,16 @@ class SqliteStore(VectorStore):
     def __init__(self, conn, collection):
         self.conn = conn
         self.collection_name = collection
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS vectors ("
-            " chunk_id TEXT PRIMARY KEY, doc_id TEXT, dim INTEGER, vec BLOB)"
-        )
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_vectors_doc ON vectors(doc_id)")
-        self.conn.commit()
+        try:
+            # a read-only open cannot create the table — correct: we are only here to
+            # read the vectors of a knowledge base we must not write to
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS vectors ("
+                " chunk_id TEXT PRIMARY KEY, doc_id TEXT, dim INTEGER, vec BLOB)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_vectors_doc ON vectors(doc_id)")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     def add(self, ids, embeddings, documents, metadatas):
         self.conn.executemany(
@@ -185,7 +190,10 @@ class SqliteStore(VectorStore):
 
     def query(self, embedding, k):
         import numpy as np
-        rows = self.conn.execute("SELECT chunk_id, vec FROM vectors").fetchall()
+        try:
+            rows = self.conn.execute("SELECT chunk_id, vec FROM vectors").fetchall()
+        except sqlite3.OperationalError:      # no such table: nothing to read
+            return []
         if not rows:
             return []
         mat = np.vstack([_unpack(r["vec"]) for r in rows])

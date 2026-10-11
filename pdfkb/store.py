@@ -60,8 +60,39 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 """
 
 
+class _NoVectors:
+    """A vector store that holds nothing and writes nothing — used when another
+    knowledge base has no vector store on disk and must not have one made for it."""
+
+    name = "none"
+
+    def __init__(self, why=""):
+        self.why = why
+
+    def add(self, *a, **k):
+        raise RuntimeError("this knowledge base is open read-only")
+
+    def query(self, *a, **k):
+        return []
+
+    def delete(self, *a, **k):
+        return None
+
+    def count(self):
+        return 0
+
+    def reset(self):
+        return None
+
+    def info(self):
+        return f"none ({self.why})" if self.why else "none"
+
+    def test(self):
+        return f"none: nothing on disk ({self.why})"
+
+
 class KB:
-    def __init__(self, data_dir=None, embedder=None, storage=None):
+    def __init__(self, data_dir=None, embedder=None, storage=None, readonly=False):
         st = storage or prefs.storage()
         if data_dir:
             base = Path(data_dir)
@@ -69,28 +100,43 @@ class KB:
                   "text_dir": base / "text", "sources_dir": base / "sources",
                   "vector_path": base / "chroma"}
         self.storage = st
+        self.readonly = readonly
         self.sqlite_path = str(st["sqlite_path"])
         self.text_dir = Path(st["text_dir"])
-        for d in (Path(st["data_dir"]), self.text_dir, Path(st["sources_dir"]),
-                  Path(st["sqlite_path"]).parent):
-            Path(d).mkdir(parents=True, exist_ok=True)
 
-        self.conn = sqlite3.connect(self.sqlite_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.executescript(SCHEMA)
-        # migrate older knowledge bases that predate the extractor column
-        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(documents)")}
-        if "extractor" not in cols:
-            self.conn.execute("ALTER TABLE documents ADD COLUMN extractor TEXT")
-        self.has_fts = True
-        try:
-            self.conn.executescript(FTS_SCHEMA)
-        except sqlite3.OperationalError:
-            self.has_fts = False          # FTS5 not compiled into this sqlite
-        self.conn.commit()
+        if readonly:
+            # Another knowledge base opened to be READ and never written: no directories,
+            # no schema, no WAL — so a cross-knowledge-base search cannot save anything
+            # into it. Missing files raise, and the caller treats it as empty.
+            self.conn = sqlite3.connect(f"file:{self.sqlite_path}?mode=ro", uri=True,
+                                        check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            self.has_fts = bool(self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").fetchone())
+        else:
+            for d in (Path(st["data_dir"]), self.text_dir, Path(st["sources_dir"]),
+                      Path(st["sqlite_path"]).parent):
+                Path(d).mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(self.sqlite_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.executescript(SCHEMA)
+            # migrate older knowledge bases that predate the extractor column
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(documents)")}
+            if "extractor" not in cols:
+                self.conn.execute("ALTER TABLE documents ADD COLUMN extractor TEXT")
+            self.has_fts = True
+            try:
+                self.conn.executescript(FTS_SCHEMA)
+            except sqlite3.OperationalError:
+                self.has_fts = False          # FTS5 not compiled into this sqlite
+            self.conn.commit()
 
-        self.vstore, self.vstore_error = make_vector_store(st, self.conn)
+        vpath = Path(st["vector_path"])
+        if readonly and not st.get("vector_url") and not vpath.exists():
+            self.vstore, self.vstore_error = _NoVectors("none on disk"), None
+        else:
+            self.vstore, self.vstore_error = make_vector_store(st, self.conn)
 
         self.embedder_error = None
         if embedder is not None:
@@ -114,18 +160,37 @@ class KB:
         row = self.conn.execute("SELECT value FROM meta WHERE key='embed_dim'").fetchone()
         return int(row["value"]) if row else None
 
+    def collection_stamp(self):
+        """The vector collection this knowledge base last wrote its embeddings into.
+
+        Recording it makes the index aware of its own content: if the store is later
+        pointed at a different collection, those vectors are not this knowledge base's
+        and the app says so instead of quietly returning another one's chunks.
+        """
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key='vector_collection'").fetchone()
+        return row["value"] if row else None
+
     def _doc_meta(self, doc_id):
         row = self.conn.execute(
             "SELECT filename,path FROM documents WHERE doc_id=?", (doc_id,)).fetchone()
         return (row["filename"], row["path"]) if row else ("", "")
 
     # ---------------------------------------------------------------- ingest
+    def _must_be_active(self):
+        if self.readonly:
+            raise RuntimeError(
+                "this knowledge base is open read-only — only the active one "
+                f"({prefs.active_library()}) can save files")
+
     def has_document(self, sha1):
         row = self.conn.execute("SELECT doc_id FROM documents WHERE sha1=?", (sha1,)).fetchone()
         return row["doc_id"] if row else None
 
     def add_document(self, pdf_path, force=False, progress=None):
         """Extract one PDF and store it as text + embeddings."""
+        self._must_be_active()
+
         def say(done, total, msg):
             if progress:
                 progress(done, total, msg)
@@ -197,6 +262,11 @@ class KB:
         self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('embed_dim',?)", (str(dim),))
         self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('embed_provider',?)",
                           (self.embedder.info(),))
+        # stamp where these embeddings live, so the index knows its own content
+        self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('vector_collection',?)",
+                          (self.storage["vector_collection"],))
+        self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('vector_backend',?)",
+                          (self.vstore.name,))
         self.conn.commit()
 
         say(3, 4, f"Writing {len(chunks)} embeddings to the {self.vstore.info()}")
@@ -222,6 +292,7 @@ class KB:
 
     def export_text(self, doc_id):
         """Write a human-readable markdown copy of the extracted text."""
+        self._must_be_active()
         doc = self.conn.execute("SELECT * FROM documents WHERE doc_id=?", (doc_id,)).fetchone()
         if not doc:
             return None
@@ -360,10 +431,14 @@ class KB:
     def stats(self):
         docs = self.conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
         chunks = self.conn.execute("SELECT COUNT(*) c FROM chunks").fetchone()["c"]
+        stamp = self.collection_stamp()
         return {"documents": docs, "chunks": chunks, "vectors": self.vstore.count(),
                 "provider": self.provider_info(),
                 "vector_backend": self.vstore.name,
                 "vector_store": self.vstore.info(),
+                "collection": self.storage["vector_collection"],
+                "collection_stamp": stamp,
+                "collection_match": (stamp is None) or (stamp == self.storage["vector_collection"]),
                 "vector_error": self.vstore_error, "sqlite": self.sqlite_path,
                 "data_dir": str(self.storage["data_dir"])}
 
@@ -373,6 +448,7 @@ class KB:
         Returns a report so the caller can verify the purge really happened
         instead of trusting a silent success.
         """
+        self._must_be_active()
         export = self.export_path(doc_id)
         ids = [r["chunk_id"] for r in self.conn.execute(
             "SELECT chunk_id FROM chunks WHERE doc_id=?", (doc_id,)).fetchall()]
@@ -407,6 +483,7 @@ class KB:
 
     def reset(self):
         """Wipe the whole knowledge base and vector store."""
+        self._must_be_active()
         self.conn.executescript(
             "DELETE FROM chunks; DELETE FROM chunks_fts; DELETE FROM documents; DELETE FROM meta;"
         )

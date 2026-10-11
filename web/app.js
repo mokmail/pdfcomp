@@ -60,20 +60,84 @@ function setBusy(b) {
 async function refresh() {
   try {
     const s = await api.get("/api/stats");
-    $("#provider").textContent = s.provider;
-    $("#status").textContent = `library ${s.library || "default"}  ·  documents ${s.documents}`
-      + `  ·  chunks ${s.chunks}  ·  vectors ${s.vectors}  ·  ${s.vector_backend || ""}`;
+    state.lastStats = s;
+    renderSetup();
     const hint = $("#search-hint");
     if (hint) {
       hint.hidden = s.documents !== 0;
       hint.textContent = s.documents === 0
-        ? "Nothing indexed in this library yet — open “Add PDFs” to ingest your first document."
+        ? "Nothing indexed in this library yet — open Sources → Local files to ingest your first document."
         : "";
     }
-  } catch (e) { $("#status").textContent = "API unavailable"; }
+  } catch (e) { log("stats unavailable: " + e); }
+}
+
+/* The setup in force, kept in the header: what embeds, where it saves, what reads it. */
+function renderSetup() {
+  const s = state.lastStats || {};
+  const st = (state.lastSettings || {}).settings || {};
+  const env = (state.lastSettings || {}).env || {};
+  const ext = st.extractor || s.extractor || "pymupdf";
+  const ver = ext === "docling" && env.docling && env.docling.installed
+    ? ` ${env.docling.version || ""}`.trimEnd() : "";
+  const dir = String(s.data_dir || "").replace(/^\/(?:Users|home)\/[^/]+/, "~");
+  const items = [
+    ["embedding", s.provider || "—", ""],
+    ["knowledge base", s.library || "default", "is-kb"],
+    ["extractor", `${ext}${ver ? " " + ver : ""}`, ""],
+    ["vector store", s.vector_backend || "—", "is-store"],
+    ["collection", s.vector_collection || "—", "is-store"],
+    ["saving in", dir || "—", ""],
+    ["indexed", `${s.documents ?? 0} docs · ${s.chunks ?? 0} chunks · ${s.vectors ?? 0} vectors`, ""],
+  ];
+  if (s.collection_match === false) {
+    items.push(["mismatch", `the store holds "${s.collection_stamp || "?"}" — re-ingest`, "is-bad"]);
+  }
+  const el = $("#setup");
+  if (el) {
+    el.innerHTML = items.map(([k, v, cls]) =>
+      `<span class="setup-item"><span class="setup-k">${esc(k)}</span>`
+      + `<span class="setup-v ${cls}">${esc(String(v))}</span></span>`).join("");
+  }
+  const sum = $("#setup-sum");
+  if (sum) {
+    sum.textContent = `setup · ${s.library || "default"} · ${ext}${ver ? " " + ver : ""}`
+      + ` · ${s.vector_backend || "—"}·${s.vector_collection || "—"}`
+      + ` · ${s.vectors ?? 0} vectors`
+      + (s.collection_match === false ? "  ⚠ collection mismatch" : "");
+  }
+}
+
+/* the setup strip folds away; it remembers what you last chose */
+const setupBar = $("#setupbar");
+if (setupBar) {
+  if (localStorage.getItem("pdfkb-setup") === "open") setupBar.open = true;
+  setupBar.ontoggle = () =>
+    localStorage.setItem("pdfkb-setup", setupBar.open ? "open" : "folded");
 }
 
 /* ------------------------------------------------------------ ingest */
+/* One line per file, plainly: indexed + embedded, already in the knowledge base,
+   nothing to extract, or failed. */
+function ingestLine(x) {
+  if (x.status === "error") return `  ✕ failed — ${x.filename}  ${x.message || ""}`;
+  if (x.status === "skipped") return `  • already in the knowledge base — skipped   ${x.filename}`;
+  if (x.status === "empty") return `  ! no text to index   ${x.filename}  ${x.message || ""}`;
+  return `  ✓ indexed + embedded   ${x.filename}  —  ${x.npages || 0} pages, `
+    + `${x.nchunks || 0} chunks${x.extractor ? ", " + x.extractor : ""}`
+    + (x.extractor_note ? `\n      note: ${x.extractor_note}` : "");
+}
+
+function ingestSummary(results) {
+  const n = (s) => (results || []).filter((x) => x.status === s).length;
+  const bits = [];
+  if (n("added")) bits.push(`${n("added")} indexed + embedded`);
+  if (n("skipped")) bits.push(`${n("skipped")} already in the knowledge base`);
+  if (n("empty")) bits.push(`${n("empty")} with no text`);
+  if (n("error")) bits.push(`${n("error")} failed`);
+  return bits.join("  ·  ");
+}
+
 async function ingest(files) {
   files = [...files].filter((f) => f.name.toLowerCase().endsWith(".pdf"));
   if (!files.length) { log("No PDF files in that selection."); return; }
@@ -87,11 +151,8 @@ async function ingest(files) {
   try {
     const r = await api.post("/api/ingest", fd);
     bar(100);
-    (r.results || []).forEach((x) => log(x.status === "error"
-      ? `  error: ${x.filename} — ${x.message}`
-      : `  ${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`
-        + (x.extractor ? `  [${x.extractor}]` : "")
-        + (x.extractor_note ? `\n     note: ${x.extractor_note}` : "")));
+    (r.results || []).forEach((x) => log(ingestLine(x)));
+    log("\n" + (ingestSummary(r.results) || "nothing to do"));
     await refresh(); loadDocs();
   } catch (e) { log("  ingest failed: " + e); bar(0); }
   finally { setBusy(false); }
@@ -147,7 +208,7 @@ async function doSearch() {
       tb.appendChild(tr);
     });
   } catch (e) { log("search failed: " + e); }
-  finally { setBusy(false); field.classList.remove("is-searching"); }
+  finally { setBusy(false); field.classList.remove("is-searching"); tabCounts(); }
 }
 $("#go").onclick = doSearch;
 $("#q").addEventListener("keydown", (e) => {
@@ -274,10 +335,22 @@ async function loadDocs() {
       };
       tb.appendChild(tr);
     });
+    tabCounts();
     refresh();
-  } catch (e) { $("#status").textContent = "API unavailable"; }
+  } catch (e) { log("documents unavailable: " + e); }
 }
 const curDoc = () => state.docs[state.selDoc];
+
+/* Live counts on the menubar: hits · saved sources · documents. */
+function tabCounts() {
+  const set = (panel, n) => {
+    const t = $$(".tab").find((x) => x.dataset.panel === panel);
+    if (t && t.dataset.n !== undefined) t.dataset.n = n ? String(n) : "";
+  };
+  set("search", state.results.length);
+  set("sources", state.sources.length);
+  set("library", state.docs.length);
+}
 
 $("#refresh").onclick = () => { refresh(); loadDocs(); };
 $("#open-any").onclick = () => { const d = curDoc(); if (d) window.open(`/api/pdf/${d.doc_id}`, "_blank"); };
@@ -387,6 +460,7 @@ const srcForm = () => {
 };
 
 function renderSources() {
+  tabCounts();
   const el = $("#src-list");
   if (!state.sources.length) { el.innerHTML = `<p class="hint">No connections yet.</p>`; return; }
   el.innerHTML = state.sources.map((s) => {
@@ -469,11 +543,9 @@ $("#src-ingest").onclick = async () => {
     });
     const r = await api.post("/api/sources/ingest", fd);
     if (!r.ok) { setText("#src-result", `ingest failed — ${r.error}`); return; }
-    const lines = (r.results || []).map((x) => x.status === "error"
-      ? `error: ${x.filename} — ${x.message}`
-      : `${x.status}: ${x.filename} (${x.npages || 0} pages, ${x.nchunks || 0} chunks)`);
+    const lines = (r.results || []).map(ingestLine);
     setText("#src-log", lines.join("\n"));
-    setText("#src-result", `done — ${lines.length} file(s)`);
+    setText("#src-result", `done — ${ingestSummary(r.results) || "nothing to do"}`);
     refresh(); loadDocs();
   } catch (e) { setText("#src-result", `ingest failed — ${e}`); }
   finally { setBusy(false); }
@@ -512,6 +584,7 @@ async function loadSettings() {
   fillExtraction(r);
   state.libraries = r.libraries || [];
   renderLibraries(r.active_library);
+  renderSetup();                   // the extractor + version live in here
 }
 
 function renderModels(models) {
@@ -603,9 +676,9 @@ function renderLibraries(active) {
   tb.innerHTML = state.libraries.map((l) => `
     <tr data-name="${esc(l.name)}">
       <td class="src">${esc(l.name)}${l.active ? "  ✓" : ""}</td>
-      <td class="mono">${esc(l.backend)}</td>
+      <td class="mono">${esc(l.collection || l.backend || "")}</td>
       <td class="mono">${l.documents != null ? l.documents : "—"}</td>
-      <td class="mono">${esc(l.data_dir)}</td>
+      <td class="mono">${esc(l.container || l.data_dir || "")}</td>
       <td class="pick">${l.active
         ? `<button class="btn ghost" type="button" disabled>active</button>`
         : `<button class="btn ghost lib-use" type="button">use</button>
@@ -691,13 +764,16 @@ $("#scope-active").onclick = () => {
 };
 $("#lib-add").onclick = async () => {
   const name = $("#lib-name").value.trim();
-  if (!name) { setText("#lib-result", "give the library a name first"); return; }
-  const fd = storageForm();
-  fd.set("name", name);
-  const r = await api.post("/api/libraries/save", fd);
+  if (!name) { setText("#lib-result", "give the knowledge base a name first"); return; }
+  // its own container: no paths are sent, so it cannot inherit the current one's
+  const r = await api.post("/api/libraries/save", new URLSearchParams({ name }));
   setText("#lib-result", r.ok
-    ? `saved library '${name}' from the storage settings above — click 'use' to switch to it`
+    ? `created '${name}' as its own container\n  container   ${r.container || ""}`
+      + `\n  collection  ${r.collection || ""}`
+      + `\n\nIt starts empty and never touches another knowledge base's files.`
+      + ` Switch to it with 'use'.`
     : `failed — ${r.error}`);
+  $("#lib-name").value = "";
   await loadLibraries();
 };
 $("#lib-update").onclick = async () => {
@@ -809,11 +885,8 @@ function liveIngest(ing) {
   if (!el) return;
   if (!ing || !ing.running) {
     if (!ing || ing.done === null || ing.done === undefined) { el.hidden = true; return; }
-    const n = (ing.results || []).reduce((a, r) => a + (r.nchunks || 0), 0);
-    const bad = (ing.results || []).filter((r) => r.status === "error").length;
     el.hidden = false;
-    el.textContent = `indexed ${n} chunks from ${(ing.results || []).length} file(s)`
-      + (bad ? ` — ${bad} failed` : "")
+    el.textContent = (ingestSummary(ing.results) || "nothing to do")
       + (ing.done && ing.started ? `  ·  ${Math.round(ing.done - ing.started)}s` : "");
     return;
   }

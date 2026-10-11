@@ -31,6 +31,10 @@ html.dark{
 }
 
 *{ box-sizing:border-box }
+/* A hidden element must really be hidden: `.btn{display:inline-flex}` and
+   `.rmodal{display:flex}` otherwise beat the browser's [hidden] rule and a closed
+   <dialog> shows inline on the page. */
+[hidden]{ display:none !important }
 /* no browser-default link blue anywhere — the palette is monochrome */
 a{ color:rgb(var(--text-ghost)); text-decoration:none }
 body{
@@ -51,7 +55,7 @@ h2{ margin:.25rem 0 .5rem; font-size:20px; font-weight:600;
 /* ------------------------------------------------------- brand header */
 .site-header{
   position:sticky; top:0; z-index:40; background:rgb(var(--bg-void));
-  border-bottom:1px solid rgb(var(--line-dim));
+  /* deliberately no rule under the nav — the tabs' own indicator marks the section */
 }
 .brandbar{
   max-width:var(--page); margin:0 auto; height:64px; padding:0 28px;
@@ -76,6 +80,12 @@ h2{ margin:.25rem 0 .5rem; font-size:20px; font-weight:600;
 }
 .crumb .sep{ margin:0 4px; color:rgb(var(--line-hi)) }
 .header-right{ margin-left:auto; display:flex; align-items:center; gap:14px }
+.header-right select{
+  height:36px; padding:0 10px; border-radius:3px;
+  font-family:var(--font-mono); font-size:11.5px;
+  background:rgb(var(--bg-void)); color:rgb(var(--text-ghost));
+  border:1px solid rgb(var(--line-hi));
+}
 .header-right .micro{ max-width:360px; text-align:right; text-transform:none; letter-spacing:.02em }
 
 /* job indicator: an install/pull running anywhere in the app */
@@ -100,18 +110,61 @@ h2{ margin:.25rem 0 .5rem; font-size:20px; font-weight:600;
 }
 @keyframes slide{ 0%{transform:translateX(-105%)} 100%{transform:translateX(370%)} }
 
+/* the current setup in the header: a foldable strip, closed by default */
+.setupbar{ border-bottom:1px solid rgb(var(--line-dim)); background:rgb(var(--bg-panel)) }
+.setupbar > summary{
+  list-style:none; cursor:pointer; max-width:var(--page); margin:0 auto;
+  padding:8px 28px; display:flex; align-items:center; gap:10px;
+  font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em;
+  color:rgb(var(--text-dim));
+}
+.setupbar > summary::-webkit-details-marker{ display:none }
+.setupbar > summary:hover{ color:rgb(var(--text-ghost)) }
+.setup-sum{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.setup-caret{ margin-left:auto; font-size:9px; color:rgb(var(--text-faint));
+              transition:transform .15s }
+.setupbar[open] .setup-caret{ transform:rotate(180deg) }
+.setupbar .inner{
+  max-width:var(--page); margin:0 auto; padding:8px 28px;
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 20px;
+  font-family:var(--font-mono); font-size:10.5px; line-height:1.5;
+}
+.setup-item{ display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap }
+.setup-k{ color:rgb(var(--text-faint)); text-transform:uppercase; letter-spacing:.09em }
+.setup-v{ color:rgb(var(--text-ghost)) }
+.setup-v.is-kb{ color:rgb(var(--acc-1)) }
+.setup-v.is-store{ color:rgb(var(--acc-2)) }
+.setup-v.is-bad{ color:rgb(var(--acc-bad)) }
+.setup-item + .setup-item::before{
+  content:"·"; margin-right:12px; color:rgb(var(--line-hi));
+}
+
 .tabs{
   max-width:var(--page); margin:0 auto; padding:0 28px;
-  display:flex; gap:28px; overflow-x:auto;
+  display:flex; align-items:stretch; gap:30px; overflow-x:auto;
 }
 .tab{
-  appearance:none; background:none; border:0; border-bottom:2px solid transparent;
-  padding:10px 0 12px; cursor:pointer; color:rgb(var(--text-faint)); white-space:nowrap;
-  font-family:var(--font-mono); font-size:10px; letter-spacing:.28em;
-  text-transform:uppercase; transition:color .15s;
+  position:relative; appearance:none; cursor:pointer; white-space:nowrap;
+  display:inline-flex; align-items:center; gap:9px;
+  margin:0; padding:17px 2px 18px;
+  background:none; border:0; border-radius:0;
+  color:rgb(var(--text-faint));
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.26em;
+  text-transform:uppercase; font-weight:500;
+  transition:color .15s;
 }
-.tab:hover{ color:rgb(var(--text-dim)) }
-.tab.is-active{ color:rgb(var(--text-ghost)); border-bottom-color:rgb(var(--text-ghost)) }
+.tab:hover{ color:rgb(var(--text-ghost)) }
+.tab.is-active{ color:rgb(var(--text-ghost)) }
+.tab.is-active::after{
+  content:""; position:absolute; left:-2px; right:-2px; bottom:0; height:3px;
+  background:rgb(var(--text-ghost));
+}
+.tab:focus-visible{ outline:2px solid rgb(var(--text-ghost)); outline-offset:-3px }
+/* a live count on the tab itself: hits · saved sources · documents */
+.tab[data-n]:not([data-n=""])::before{
+  content:attr(data-n); font-family:var(--font-mono); font-size:10.5px;
+  letter-spacing:.06em; color:rgb(var(--text-faint));
+}
 
 /* --------------------------------------------------------------- main */
 .container{ max-width:var(--page); margin:0 auto; padding:40px 28px 64px }
@@ -188,19 +241,22 @@ h2{ margin:.25rem 0 .5rem; font-size:20px; font-weight:600;
 
 .actions{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0 18px }
 .btn{
-  appearance:none; display:inline-flex; align-items:center; gap:8px; cursor:pointer;
-  font-family:var(--font-mono); font-size:11px; letter-spacing:.09em;
-  text-transform:uppercase; text-decoration:none; padding:11px 16px;
-  border:1px solid rgb(var(--line-hi)); border-radius:2px;
+  appearance:none; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  cursor:pointer; text-decoration:none; white-space:nowrap;
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  padding:10px 15px; border:1px solid rgb(var(--line-hi)); border-radius:3px;
   background:transparent; color:rgb(var(--text-ghost));
-  transition:background .15s, border-color .15s, color .15s;
+  transition:background .15s, border-color .15s, color .15s, transform .07s, box-shadow .15s;
 }
 .btn:hover{ border-color:rgb(var(--text-ghost)); background:rgb(var(--bg-panel-hi)) }
+.btn:active{ transform:translateY(1px) }
+.btn:focus-visible{ outline:2px solid rgb(var(--text-ghost)); outline-offset:2px }
 .btn.primary{ background:rgb(var(--text-ghost)); color:rgb(var(--bg-void));
               border-color:rgb(var(--text-ghost)) }
 .btn.primary:hover{ background:rgb(var(--text-dim)); border-color:rgb(var(--text-dim)) }
 .btn.ghost{ color:rgb(var(--text-faint)); border-color:rgb(var(--line-dim)) }
-.btn[disabled]{ opacity:.45; cursor:not-allowed }
+.btn.ghost:hover{ color:rgb(var(--text-ghost)) }
+.btn[disabled]{ opacity:.42; cursor:not-allowed; transform:none; box-shadow:none }
 .check{ display:inline-flex; align-items:center; gap:8px; font-size:13px;
         color:rgb(var(--text-dim)); cursor:pointer }
 input[type=radio], input[type=checkbox]{ accent-color:rgb(var(--text-ghost)); margin:0 }
@@ -351,6 +407,7 @@ code{
 }
 
 /* ------------------------------------------------- result modal (dialog) */
+dialog.rmodal:not([open]){ display:none }   /* a closed dialog is gone, not just un-flagged */
 .rmodal{
   width:min(1180px, 94vw); max-height:88vh; padding:0; border-radius:3px;
   background:rgb(var(--bg-void)); color:rgb(var(--text-dim));
@@ -388,29 +445,14 @@ code{
 }
 
 /* ------------------------------------------------------------ status */
-.statusbar{
-  position:sticky; bottom:0; background:rgb(var(--bg-void));
-  border-top:1px solid rgb(var(--line-dim)); padding:10px 28px;
-}
-.statusbar .inner{
-  max-width:var(--page); margin:0 auto; display:flex; justify-content:space-between;
-  gap:20px; font-family:var(--font-mono); font-size:11px; letter-spacing:.05em;
-  text-transform:uppercase; color:rgb(var(--text-faint));
-}
-.foot-brand{ color:rgb(var(--text-dim)) }
+.statusbar{ display:none }
 
 /* ============================================================ colour layer
    The surfaces stay neutral; everything below is where the brand colour lives.
    Green = primary action, cyan = references/links/focus, lime = scores,
    amber = a running job or a warning, red = destructive and errors. */
 
-/* header: a brand rule under the bar */
-.site-header::after{
-  content:""; display:block; height:2px;
-  background:linear-gradient(90deg,
-            rgb(var(--acc-1)), rgb(var(--acc-2)) 52%, rgb(var(--acc-3)));
-  opacity:.9;
-}
+/* the nav bar ends clean: no hairline, no brand rule under it */
 .wordmark .mark{ filter:none; opacity:1 }
 .crumb .sep{ color:rgb(var(--acc-2)/.55) }
 .crumb b{ color:rgb(var(--acc-2)); font-weight:500 }
@@ -428,18 +470,25 @@ code{
   background:linear-gradient(90deg, rgb(var(--acc-1)), rgb(var(--acc-2)), rgb(var(--acc-3)));
 }
 
-/* tabs */
+/* tabs — flat: colour and the brand rule only, no chrome of their own */
 .tab:hover{ color:rgb(var(--acc-2)) }
-.tab.is-active{ color:rgb(var(--text-ghost)); border-bottom-color:rgb(var(--acc-1)) }
+.tab.is-active{ color:rgb(var(--text-ghost)) }
+.tab.is-active::after{ background:linear-gradient(90deg, rgb(var(--acc-1)), rgb(var(--acc-2))) }
+.tab:focus-visible{ outline-color:rgb(var(--acc-2)) }
+.tab[data-n]:not([data-n=""])::before{ color:rgb(var(--acc-3)) }
 
 /* step labels pick up the reference colour */
 .card > .micro:first-child, .panel > .micro:first-child{ color:rgb(var(--acc-2)) }
 
 /* buttons */
-.btn.primary{ background:rgb(var(--acc-1)); border-color:rgb(var(--acc-1)); color:#0a0e0c }
+.btn.primary{ background:rgb(var(--acc-1)); border-color:rgb(var(--acc-1)); color:#0a0e0c;
+              box-shadow:0 1px 2px rgb(var(--acc-1)/.35) }
 .btn.primary:hover{ background:rgb(var(--acc-1)/.85); border-color:rgb(var(--acc-1)/.85) }
 .btn:hover{ border-color:rgb(var(--acc-2)/.7) }
-.btn:focus-visible, .tab:focus-visible{ outline:2px solid rgb(var(--acc-2)); outline-offset:2px }
+.btn:focus-visible{ outline:2px solid rgb(var(--acc-2)); outline-offset:2px }
+.btn.danger{ color:rgb(var(--acc-bad)); border-color:rgb(var(--acc-bad)/.5) }
+.btn.danger:hover{ background:rgb(var(--acc-bad)/.10); border-color:rgb(var(--acc-bad)) }
+.btn.danger.ghost{ color:rgb(var(--acc-bad)/.85) }
 .search-go{
   background-image:linear-gradient(94deg, rgb(var(--acc-1)), rgb(var(--acc-2)));
   border-color:transparent; color:#0a0e0c; font-weight:500;

@@ -62,8 +62,10 @@ def kb() -> KB:
     return _kb
 
 
-def _kb_for(lib: str) -> KB:
-    """The KB for a named library (the active one is the cached default)."""
+def _kb_for(lib: str) -> KB | None:
+    """The KB for a named library. The active one is the writable handle; any other is
+    opened strictly read-only, so searching across knowledge bases can never save a file
+    into one of them. A library whose files are gone reads as empty (None)."""
     if not lib or lib == prefs.active_library():
         return kb()
     with _lock:
@@ -71,7 +73,10 @@ def _kb_for(lib: str) -> KB:
             cfg = prefs.libraries_map().get(lib)
             if cfg is None:
                 raise KeyError(f"unknown library: {lib}")
-            _kbs[lib] = KB(storage=prefs.storage(cfg))
+            try:
+                _kbs[lib] = KB(storage=prefs.storage(cfg), readonly=True)
+            except Exception:  # noqa: BLE001  nothing to read, and nothing gets created
+                _kbs[lib] = None
         return _kbs[lib]
 
 
@@ -86,9 +91,14 @@ def reload_kb():
 def _stats() -> dict:
     k = kb()
     s = k.stats()
+    st = prefs.storage()
     return {"provider": s["provider"], "documents": s["documents"], "chunks": s["chunks"],
             "vectors": s["vectors"], "vector_backend": s["vector_backend"],
             "vector_store": s["vector_store"], "library": prefs.active_library(),
+            "vector_collection": st["vector_collection"],
+            "collection_stamp": s.get("collection_stamp"),
+            "collection_match": s.get("collection_match"),
+            "extractor": prefs.load().get("extractor") or "pymupdf",
             "vector_error": s.get("vector_error"), "sqlite": s["sqlite"], "data_dir": s["data_dir"]}
 
 
@@ -136,13 +146,15 @@ def _search_multi(q, mode, k, libs):
     """Search one or several libraries and merge the ranked lists."""
     labels = {lib: _kb_label(lib) for lib in libs}
     if len(libs) == 1:
-        return [_hit(h, libs[0], labels[libs[0]])
-                for h in _kb_for(libs[0]).search(q, k=k, mode=mode)]
+        one = _kb_for(libs[0])
+        return [] if one is None else [_hit(h, libs[0], labels[libs[0]])
+                                       for h in one.search(q, k=k, mode=mode)]
 
     per = {}
     for lib in libs:
         try:
-            per[lib] = _kb_for(lib).search(q, k=max(k, 10), mode=mode)
+            k_ = _kb_for(lib)
+            per[lib] = k_.search(q, k=max(k, 10), mode=mode) if k_ is not None else []
         except Exception:  # noqa: BLE001  (a broken library must not kill the search)
             per[lib] = []
 
@@ -289,6 +301,9 @@ async def context(request: Request):
         k = await run_in_threadpool(_kb_for, lib)
     except Exception:  # noqa: BLE001
         return JSONResponse({"page": page, "chunks": [], "error": f"unknown library: {lib}"})
+    if k is None:
+        return JSONResponse({"page": page, "chunks": [],
+                             "error": f"nothing readable in library: {lib}"})
     chunks = await run_in_threadpool(k.page_context, doc_id, page)
     return JSONResponse({"page": page, "library": lib or prefs.active_library(), "chunks": chunks})
 
@@ -313,6 +328,8 @@ async def pdf_in_library(request: Request):
         k = await run_in_threadpool(_kb_for, lib)
     except Exception:  # noqa: BLE001
         return JSONResponse({"detail": f"unknown library: {lib}"}, status_code=404)
+    if k is None:
+        return JSONResponse({"detail": f"nothing readable in library: {lib}"}, status_code=404)
     row = await run_in_threadpool(
         lambda: k.conn.execute("SELECT path,filename FROM documents WHERE doc_id=?", (doc_id,)).fetchone())
     if not row:
@@ -536,14 +553,23 @@ async def libraries_list(request: Request):
 
 
 async def libraries_save(request: Request):
-    """Create a library, or update one, from the submitted storage settings."""
+    """Create a knowledge base, or update one, from the submitted storage settings.
+
+    Creation ignores the submitted paths on purpose: a new knowledge base must not
+    inherit the container of the one it is created from (that is how two of them end
+    up sharing a database and a vector collection). It gets its own.
+    """
     form = await request.form()
     try:
         name = str(form.get("name", "")).strip()
         cfg = {k: str(form.get(k, "")) for k in prefs.STORAGE_KEYS if k in form}
         await run_in_threadpool(prefs.save_library, name, cfg or None)
         reload_kb()
+        mine = next((l for l in await run_in_threadpool(prefs.libraries_list)
+                     if l["name"] == name), {})
         return JSONResponse({"ok": True, "name": name, "active": prefs.active_library(),
+                             "container": mine.get("container"),
+                             "collection": mine.get("collection"),
                              "libraries": await run_in_threadpool(prefs.libraries_list)})
     except Exception as ex:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": f"{type(ex).__name__}: {ex}"})

@@ -12,6 +12,7 @@ target knowledge bases and switch between them.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -201,25 +202,63 @@ def libraries_list() -> list:
             docs = None
         out.append({"name": name, "active": name == active, "exists": exists,
                     "documents": docs, "backend": st["vector_backend"],
+                    "collection": st["vector_collection"],
+                    "container": str(st["data_dir"]),
                     "data_dir": str(st["data_dir"]),
                     "vector": st["vector_url"] or str(st["vector_path"])})
     return sorted(out, key=lambda x: (not x["active"], x["name"] or ""))
 
 
 def save_library(name: str, storage_cfg: dict | None = None) -> dict:
-    """Create or update a library (defaults to the current storage settings)."""
+    """Create or update a library.
+
+    A **new** knowledge base is a separate container: its own directory (so its
+    database, vector store, exports and stored source copies are its own) and its own
+    vector collection (so its embeddings can never be found as another one's). It
+    never inherits the paths of the knowledge base it was created from. An update of
+    an existing one takes the paths you submitted — and a directory another knowledge
+    base already uses is refused, so two of them can never share files.
+    """
     name = (name or "").strip()
     if not name:
-        raise ValueError("a library needs a name")
+        raise ValueError("a knowledge base needs a name")
     s = load()
     libs = libraries_map()
-    cfg = _snapshot(s) if storage_cfg is None else {
-        k: str(storage_cfg.get(k, "") or "") for k in STORAGE_KEYS}
+    known = name in libs
+
+    if known and storage_cfg is not None:
+        cfg = {k: str(storage_cfg.get(k, "") or "") for k in STORAGE_KEYS}
+    else:
+        base = _snapshot(s)
+        cfg = {k: str(base.get(k, "") or "") for k in STORAGE_KEYS}
+        cfg["data_dir"] = str(library_container(name))
+        for k in ("sqlite_path", "vector_path", "text_dir", "sources_dir"):
+            cfg[k] = ""                       # each resolves inside its own container
+        coll = (str(base.get("vector_collection") or "") or config.COLLECTION).split("__")[0]
+        cfg["vector_collection"] = f"{coll}__{_slug(name)}"
+
+    target = Path(cfg["data_dir"] or config.DATA_DIR).expanduser().resolve()
+    for other, ocfg in libs.items():
+        if other == name:
+            continue
+        if Path(_resolve(ocfg)["data_dir"]).expanduser().resolve() == target:
+            raise ValueError(f"'{other}' already keeps its knowledge base in {target} — "
+                             "every knowledge base needs its own container")
+    active = s.get("active_library") or "default"
+    if name != active and Path(_resolve(s)["data_dir"]).expanduser().resolve() == target:
+        raise ValueError("that directory is the active knowledge base's own container")
+
     libs[name] = cfg
     data = {"libraries": libs}
-    if name == (s.get("active_library") or "default"):
+    if name == active:
         data.update(cfg)
-    return save(data)
+    saved = save(data)
+    if not known:
+        # a brand-new knowledge base gets its container straight away; an existing one
+        # pointed at a new path is left alone so the purge guard can still recognise
+        # (and refuse) a directory that is not a knowledge base
+        ensure_storage_dirs(_resolve(cfg))
+    return saved
 
 
 def use_library(name: str) -> dict:
@@ -234,6 +273,17 @@ def use_library(name: str) -> dict:
     data["libraries"] = libs
     data["active_library"] = name
     return save(data)
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-") or "kb"
+
+
+def library_container(name: str) -> Path:
+    """The directory a new knowledge base gets of its own — beside, never inside,
+    the one it was created from."""
+    base = Path(storage()["data_dir"]).expanduser()
+    return base.parent / f"{base.name}-{_slug(name)}"
 
 
 def _looks_like_kb(d: Path) -> bool:
